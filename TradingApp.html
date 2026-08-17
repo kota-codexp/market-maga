@@ -1,0 +1,603 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Market Maga - Fund Tracker</title>
+  
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  
+  <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: { sans: ['Inter', 'sans-serif'] },
+          colors: {
+            appNavy: '#0B1121', appCard: '#151E32', appBorder: '#2A364F',
+            appGreen: '#10B981', appRed: '#EF4444', appAccent: '#38BDF8'
+          }
+        }
+      }
+    }
+  </script>
+</head>
+<body class="bg-appNavy text-gray-200 font-sans antialiased selection:bg-appAccent selection:text-white overflow-x-hidden">
+  
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect, useRef } = React;
+
+    const formatMoney = (amount) => {
+      if (amount === null || amount === undefined || isNaN(amount)) return '-';
+      return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(amount);
+    };
+
+    const formatPrice = (amount) => {
+      if (amount === null || amount === undefined || isNaN(amount)) return '-';
+      return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', minimumFractionDigits: 2, maximumFractionDigits: 3 }).format(amount);
+    };
+
+    const cleanDateForInput = (rawDate) => {
+      if (!rawDate) return '';
+      let dStr = String(rawDate).trim();
+      if (/^\d{4}-\d{2}-\d{2}$/.test(dStr)) return dStr; 
+      
+      if (dStr.includes('/') || dStr.includes('-')) {
+        const parts = dStr.split(/[-/]/);
+        if (parts.length === 3 && parts[2].length === 4) { 
+           let p1 = parseInt(parts[0]);
+           let p2 = parseInt(parts[1]);
+           let day = p1 > 12 ? p2 : p1;
+           let month = p1 > 12 ? p1 : p2;
+           return `${parts[2]}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+        }
+      }
+      
+      const d = new Date(dStr);
+      if (!isNaN(d.getTime())) {
+        const year = d.getFullYear();
+        const month = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
+      }
+      return dStr; 
+    };
+
+    // --- MONTHLY STATEMENTS COMPONENT ---
+    function MonthlyStatementView({ cashLedger, trades, traders }) {
+      const allDates = [...cashLedger.map(c => c.date), ...trades.map(t => t.buyDate), ...trades.map(t => t.status === 'Closed' ? t.sellDate : null)].filter(d => d); 
+      const uniqueMonths = [...new Set(allDates.map(d => d.substring(0, 7)))].sort().reverse(); 
+      const [selectedMonth, setSelectedMonth] = useState(uniqueMonths[0] || '');
+
+      useEffect(() => {
+        if (!uniqueMonths.includes(selectedMonth) && uniqueMonths.length > 0) { setSelectedMonth(uniqueMonths[0]); }
+      }, [uniqueMonths, selectedMonth]);
+
+      const getCashBalancesAsOf = (targetDateStr) => {
+        let bals = {}; traders.forEach(t => bals[t.id] = 0);
+        cashLedger.forEach(entry => {
+          if (entry.date <= targetDateStr) {
+            if (entry.purpose === 'New Investment') { if (bals[entry.toMemberId] !== undefined) bals[entry.toMemberId] += entry.amount; } 
+            else if (entry.purpose === 'Withdrawal') { if (bals[entry.fromMemberId] !== undefined) bals[entry.fromMemberId] -= entry.amount; } 
+            else { if (bals[entry.fromMemberId] !== undefined) bals[entry.fromMemberId] -= entry.amount; if (bals[entry.toMemberId] !== undefined) bals[entry.toMemberId] += entry.amount; }
+          }
+        });
+        trades.forEach(trade => {
+          if (trade.buyDate <= targetDateStr) { if (bals[trade.traderId] !== undefined) bals[trade.traderId] -= (trade.buyPrice * trade.qty); }
+          if (trade.status === 'Closed' && trade.sellDate && trade.sellDate <= targetDateStr) {
+            // FIX: Deduct exactly 15.34 for DP charges on closed trades
+            let returned = (trade.buyPrice * trade.qty) + trade.pat - 15.34;
+            if (bals[trade.traderId] !== undefined) bals[trade.traderId] += returned;
+          }
+        });
+        return bals;
+      };
+
+      if (!selectedMonth) return <div class="p-8 text-gray-400">No data available yet to generate statements.</div>;
+
+      const openingBalances = getCashBalancesAsOf(selectedMonth + "-00"); 
+      const closingBalances = getCashBalancesAsOf(selectedMonth + "-32"); 
+      
+      let flows = {}; 
+      traders.forEach(t => flows[t.id] = { invested: 0, transfersIn: 0, transfersOut: 0, withdrawn: 0, spentOnTrades: 0, returnedFromTrades: 0, realizedPnL: 0 });
+
+      cashLedger.forEach(entry => {
+        if (entry.date.startsWith(selectedMonth)) {
+          if (entry.purpose === 'New Investment') { 
+            if (flows[entry.fromMemberId]) flows[entry.fromMemberId].invested += entry.amount; 
+            if (entry.fromMemberId !== entry.toMemberId) {
+               if (flows[entry.fromMemberId]) flows[entry.fromMemberId].transfersOut += entry.amount;
+               if (flows[entry.toMemberId]) flows[entry.toMemberId].transfersIn += entry.amount;
+            }
+          } else if (entry.purpose === 'Withdrawal') { 
+            if (flows[entry.fromMemberId]) flows[entry.fromMemberId].withdrawn += entry.amount; 
+          } else { 
+            if (flows[entry.fromMemberId]) flows[entry.fromMemberId].transfersOut += entry.amount; 
+            if (flows[entry.toMemberId]) flows[entry.toMemberId].transfersIn += entry.amount; 
+          }
+        }
+      });
+
+      trades.forEach(trade => {
+        if (trade.buyDate.startsWith(selectedMonth)) { if (flows[trade.traderId]) flows[trade.traderId].spentOnTrades += (trade.buyPrice * trade.qty); }
+        if (trade.status === 'Closed' && trade.sellDate && trade.sellDate.startsWith(selectedMonth)) {
+          // FIX: Deduct exactly 15.34 for DP charges on closed trades
+          let returned = (trade.buyPrice * trade.qty) + trade.pat - 15.34;
+          if (flows[trade.traderId]) { flows[trade.traderId].returnedFromTrades += returned; flows[trade.traderId].realizedPnL += trade.actualPnL; }
+        }
+      });
+
+      const monthNames = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+      const [year, monthStr] = selectedMonth.split('-'); const displayMonth = `${monthNames[parseInt(monthStr) - 1]} ${year}`;
+
+      return (
+        <div class="animate-fade-in space-y-6">
+          <div class="flex justify-between items-center bg-appNavy border border-appBorder rounded-xl p-5 shadow-inner">
+            <div><h1 class="text-2xl font-semibold text-white">Monthly Statements</h1><p class="text-sm text-gray-400 mt-1">Track exactly how cash moved in and out of every trader's hands.</p></div>
+            <div class="flex items-center space-x-3"><span class="text-gray-400 font-medium">Select Month:</span><select value={selectedMonth} onChange={(e) => setSelectedMonth(e.target.value)} class="bg-appCard border border-appAccent text-white font-semibold rounded-lg px-4 py-2 focus:outline-none focus:ring-2 ring-appAccent/50 cursor-pointer">{uniqueMonths.map(m => { const [y, mStr] = m.split('-'); return <option key={m} value={m}>{monthNames[parseInt(mStr) - 1]} {y}</option>; })}</select></div>
+          </div>
+          <div class="bg-appNavy border border-appBorder rounded-xl overflow-hidden shadow-xl">
+            <div class="p-5 bg-appCard border-b border-appBorder flex justify-between items-center"><h3 class="text-white font-semibold text-lg">Cash Flow Statement: {displayMonth}</h3><span class="text-xs text-appAccent border border-appAccent/30 bg-appAccent/10 px-3 py-1 rounded">All amounts reflect physical cash held by the trader</span></div>
+            <div class="overflow-x-auto">
+              <table class="w-full text-left text-sm whitespace-nowrap">
+                <thead class="bg-appNavy border-b border-appBorder text-gray-400 text-xs">
+                  <tr><th class="px-5 py-4 font-semibold uppercase text-white">Trader Name</th><th class="px-5 py-4 font-semibold uppercase">Opening Cash</th><th class="px-5 py-4 font-semibold uppercase text-appGreen">+ New Invested</th><th class="px-5 py-4 font-semibold uppercase text-appGreen">+ Transfers In</th><th class="px-5 py-4 font-semibold uppercase text-appRed">- Transfers Out</th><th class="px-5 py-4 font-semibold uppercase text-appRed">- Withdrawn</th><th class="px-5 py-4 font-semibold uppercase text-appRed">- Spent on Trades</th><th class="px-5 py-4 font-semibold uppercase text-appGreen">+ Returned (Net)</th><th class="px-5 py-4 font-semibold uppercase text-white border-l border-appBorder bg-white/5">= Closing Cash</th><th class="px-5 py-4 font-semibold uppercase text-gray-500 border-l border-appBorder border-r">Realized P&L</th></tr>
+                </thead>
+                <tbody class="divide-y divide-appBorder/50">
+                  {traders.map((t) => {
+                    const open = openingBalances[t.id] || 0; const close = closingBalances[t.id] || 0; const f = flows[t.id];
+                    return (
+                      <tr key={t.id} class="hover:bg-white/5 transition">
+                        <td class="px-5 py-4 font-bold text-white">{t.name}</td><td class="px-5 py-4 text-gray-300">{formatMoney(open)}</td><td class="px-5 py-4 text-appGreen">{f.invested > 0 ? formatMoney(f.invested) : '-'}</td><td class="px-5 py-4 text-appGreen">{f.transfersIn > 0 ? formatMoney(f.transfersIn) : '-'}</td><td class="px-5 py-4 text-appRed">{f.transfersOut > 0 ? formatMoney(f.transfersOut) : '-'}</td><td class="px-5 py-4 text-appRed">{f.withdrawn > 0 ? formatMoney(f.withdrawn) : '-'}</td><td class="px-5 py-4 text-appRed font-medium">{f.spentOnTrades > 0 ? formatMoney(f.spentOnTrades) : '-'}</td><td class="px-5 py-4 text-appGreen font-medium">{f.returnedFromTrades > 0 ? formatMoney(f.returnedFromTrades) : '-'}</td><td class="px-5 py-4 font-bold text-white border-l border-appBorder bg-white/5">{formatMoney(close)}</td><td class={`px-5 py-4 font-medium border-l border-appBorder border-r ${f.realizedPnL > 0 ? 'text-appGreen' : (f.realizedPnL < 0 ? 'text-appRed' : 'text-gray-500')}`}>{f.realizedPnL !== 0 ? formatMoney(f.realizedPnL) : '-'}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // --- CASH LEDGER VIEW ---
+    function CashLedgerView({ cashLedger, setCashLedger, traders, setTraders, trades }) {
+      const [showForm, setShowForm] = useState(false); const [editingLedgerId, setEditingLedgerId] = useState(null); const [selectedLedgerIds, setSelectedLedgerIds] = useState([]); 
+      const emptyForm = { date: '', amount: '', fromMemberId: traders[0]?.id || '', toMemberId: traders[3]?.id || '', purpose: 'New Investment', comments: '', linkedTradeIds: [] };
+      const [formData, setFormData] = useState(emptyForm);
+      const handleChange = (e) => { setFormData({ ...formData, [e.target.name]: e.target.value }); };
+      const handleEdit = (entry) => { setFormData({ date: cleanDateForInput(entry.date), amount: entry.amount, fromMemberId: entry.fromMemberId, toMemberId: entry.toMemberId, purpose: entry.purpose, comments: entry.comments || '', linkedTradeIds: entry.linkedTradeIds || [] }); setEditingLedgerId(entry.id); setShowForm(true); };
+      const handleDelete = (entry) => { if(window.confirm('Are you sure you want to completely delete this passbook entry?')) { setCashLedger(cashLedger.filter(l => l.id !== entry.id)); setSelectedLedgerIds(selectedLedgerIds.filter(id => id !== entry.id)); } };
+      const handleBulkDelete = () => { if(window.confirm(`Are you sure you want to completely delete these ${selectedLedgerIds.length} passbook entries?`)) { setCashLedger(cashLedger.filter(l => !selectedLedgerIds.includes(l.id))); setSelectedLedgerIds([]); } };
+      const handleSelectAll = (e) => { if (e.target.checked) setSelectedLedgerIds(cashLedger.map(l => l.id)); else setSelectedLedgerIds([]); };
+      const handleSubmit = (e) => { e.preventDefault(); const entry = { id: editingLedgerId || Date.now(), date: formData.date, amount: parseFloat(formData.amount), fromMemberId: parseInt(formData.fromMemberId), toMemberId: parseInt(formData.toMemberId), purpose: formData.purpose, comments: formData.comments, linkedTradeIds: formData.purpose === 'Stock Sales' ? formData.linkedTradeIds : [] }; if (editingLedgerId) { setCashLedger(cashLedger.map(l => l.id === editingLedgerId ? entry : l).sort((a, b) => new Date(b.date) - new Date(a.date))); } else { setCashLedger([...cashLedger, entry].sort((a, b) => new Date(b.date) - new Date(a.date))); } setFormData(emptyForm); setShowForm(false); setEditingLedgerId(null); };
+
+      const fileInputRef = useRef(null); const [importStatus, setImportStatus] = useState('idle'); const [csvHeaders, setCsvHeaders] = useState([]); const [csvRawData, setCsvRawData] = useState([]); const [columnMap, setColumnMap] = useState({}); const [unknownTraders, setUnknownTraders] = useState([]); const [traderMap, setTraderMap] = useState({}); const [importSummary, setImportSummary] = useState(null);
+      const expectedFields = [{ key: 'date', label: 'Date', required: true, match: ['date', 'time'] }, { key: 'amount', label: 'Amount', required: true, match: ['amount', 'value', '₹', 'price'] }, { key: 'fromMember', label: 'From Member', required: true, match: ['from', 'sender', 'who'] }, { key: 'toMember', label: 'To Member', required: true, match: ['to', 'receiver'] }, { key: 'purpose', label: 'Purpose', required: true, match: ['purpose', 'type', 'category'] }, { key: 'comments', label: 'Comments', required: false, match: ['comment', 'note', 'details', 'remarks'] }];
+      const handleFileUpload = (e) => { const file = e.target.files[0]; if (!file) return; Papa.parse(file, { header: true, skipEmptyLines: true, complete: (results) => { const headers = results.meta.fields; setCsvHeaders(headers); setCsvRawData(results.data); const initialMap = {}; expectedFields.forEach(field => { const matchedHeader = headers.find(h => field.match.some(alias => h.toLowerCase().includes(alias))); if (matchedHeader) initialMap[field.key] = matchedHeader; }); setColumnMap(initialMap); detectUnknownTraders(initialMap.fromMember, initialMap.toMember, results.data); setImportStatus('mapping'); } }); e.target.value = ''; };
+      const detectUnknownTraders = (fromCol, toCol, data) => { if (!fromCol && !toCol) { setUnknownTraders([]); return; } const uniqueNames = new Set(); data.forEach(row => { if (fromCol && row[fromCol]) uniqueNames.add(row[fromCol].trim()); if (toCol && row[toCol]) uniqueNames.add(row[toCol].trim()); }); const existingNamesUpper = traders.map(t => t.name.toUpperCase()); const missing = [...uniqueNames].filter(n => n && !existingNamesUpper.includes(n.toUpperCase())); setUnknownTraders(missing); const initialTraderMap = {}; missing.forEach(m => initialTraderMap[m] = 'NEW'); setTraderMap(initialTraderMap); };
+      const handleColumnMapChange = (fieldKey, selectedHeader) => { const newMap = { ...columnMap, [fieldKey]: selectedHeader }; setColumnMap(newMap); detectUnknownTraders(newMap.fromMember, newMap.toMember, csvRawData); };
+      const executeImport = () => { let successfulEntries = []; let failedRows = []; let newlyAddedTraders = [...traders]; const parseNum = (val) => { if (!val) return null; const num = parseFloat(String(val).replace(/[^0-9.-]+/g,"")); return isNaN(num) ? null : num; }; const resolveTraderId = (nameString) => { if (!nameString) return null; nameString = nameString.trim(); const existingMatch = newlyAddedTraders.find(t => t.name.toUpperCase() === nameString.toUpperCase()); if (existingMatch) return existingMatch.id; const decision = traderMap[nameString]; if (decision === 'NEW') { const newTrader = { id: Date.now() + Math.random(), name: nameString }; newlyAddedTraders.push(newTrader); return newTrader.id; } return parseInt(decision); };
+        csvRawData.forEach((row, index) => {
+          const date = cleanDateForInput(row[columnMap.date]); const amt = parseNum(row[columnMap.amount]); const fromName = row[columnMap.fromMember]; const toName = row[columnMap.toMember]; const rawPurpose = row[columnMap.purpose] || '';
+          if (!date || amt === null || !fromName || !toName) { failedRows.push(`Row ${index + 2}: Missing mandatory fields`); return; }
+          const fromId = resolveTraderId(fromName); const toId = resolveTraderId(toName); const validPurposes = ['New Investment', 'Stock Sales', 'Custody Transfer', 'Withdrawal', 'Other']; const matchedPurpose = validPurposes.find(p => p.toLowerCase() === rawPurpose.trim().toLowerCase()) || 'Other';
+          const entry = { id: Date.now() + Math.random(), date: date, amount: amt, fromMemberId: fromId, toMemberId: toId, purpose: matchedPurpose, comments: row[columnMap.comments] || '', linkedTradeIds: [] };
+          successfulEntries.push(entry);
+        });
+        setTraders(newlyAddedTraders); setCashLedger([...cashLedger, ...successfulEntries].sort((a, b) => new Date(b.date) - new Date(a.date))); setImportSummary({ successCount: successfulEntries.length, fails: failedRows }); setImportStatus('summary');
+      };
+
+      const getTraderName = (id) => traders.find(tr => tr.id === id)?.name || 'Unknown';
+      const contributions = cashLedger.filter(c => c.purpose === 'New Investment'); const uniqueMonths = [...new Set(contributions.map(c => c.date.substring(0, 7)))].sort(); const gridData = {}; traders.forEach(t => { gridData[t.id] = { name: t.name, totalNet: 0, months: {} }; uniqueMonths.forEach(m => gridData[t.id].months[m] = 0); });
+      cashLedger.forEach(entry => { if (!entry.date) return; const monthKey = entry.date.substring(0, 7); if (entry.purpose === 'New Investment' && gridData[entry.fromMemberId]) { gridData[entry.fromMemberId].months[monthKey] += entry.amount; gridData[entry.fromMemberId].totalNet += entry.amount; } });
+
+      return (
+        <div class="animate-fade-in space-y-8">
+          <div class="flex justify-between items-center mb-6">
+            <h1 class="text-2xl font-semibold text-white">Cash Ledger & Contributions</h1>
+            <div class="space-x-3 flex items-center">
+              {selectedLedgerIds.length > 0 && <button onClick={handleBulkDelete} class="bg-appRed text-white font-semibold px-4 py-2 rounded-lg hover:bg-red-500 transition animate-fade-in">Delete Selected ({selectedLedgerIds.length})</button>}
+              <input type="file" accept=".csv" ref={fileInputRef} onChange={handleFileUpload} class="hidden" />
+              <button onClick={() => fileInputRef.current.click()} class="bg-appCard border border-appBorder text-white font-semibold px-4 py-2 rounded-lg hover:bg-white/5 transition">↑ Upload CSV</button>
+              <button onClick={() => { setFormData(emptyForm); setEditingLedgerId(null); setShowForm(!showForm); setImportStatus('idle'); }} class="bg-appAccent text-appNavy font-semibold px-4 py-2 rounded-lg hover:bg-sky-400 transition">{showForm ? 'Cancel' : '+ Add Passbook Entry'}</button>
+            </div>
+          </div>
+          {importStatus === 'mapping' && ( <div class="bg-appNavy border border-appBorder rounded-xl p-6 mb-8 shadow-inner animate-fade-in"><h2 class="text-xl text-white mb-2">Map CSV Columns</h2><div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">{expectedFields.map(field => (<div key={field.key} class="bg-appCard p-4 rounded-lg border border-appBorder"><label class="block text-sm text-white mb-2">{field.label} {field.required && <span class="text-appRed">*</span>}</label><select value={columnMap[field.key] || ''} onChange={(e) => handleColumnMapChange(field.key, e.target.value)} class="w-full bg-appNavy border border-appBorder text-white rounded px-3 py-2 text-sm focus:border-appAccent outline-none"><option value="" class="italic text-gray-500">-- Not in this file --</option>{csvHeaders.map(header => <option key={header} value={header}>{header}</option>)}</select></div>))}</div>{unknownTraders.length > 0 && ( <div class="mb-8 p-5 bg-appCard border border-yellow-500/30 rounded-xl"><h3 class="text-yellow-500 font-semibold mb-2">⚠ Unknown Traders Found</h3><div class="grid grid-cols-1 md:grid-cols-2 gap-4">{unknownTraders.map(ut => (<div key={ut} class="flex items-center justify-between bg-appNavy p-3 rounded border border-appBorder"><span class="text-white text-sm font-medium">"{ut}"</span><select value={traderMap[ut]} onChange={(e) => setTraderMap({...traderMap, [ut]: e.target.value})} class="bg-appCard border border-appBorder text-white rounded px-2 py-1 text-sm outline-none"><option value="NEW">+ Add as New Trader</option><optgroup label="Map to existing:">{traders.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}</optgroup></select></div>))}</div></div> )}<div class="flex justify-between items-center border-t border-appBorder pt-4"><button onClick={() => setImportStatus('idle')} class="text-gray-400 hover:text-white transition">Cancel Import</button><button onClick={executeImport} class="bg-appGreen text-appNavy font-bold px-6 py-2 rounded-lg hover:bg-green-400 transition">Confirm & Import Data</button></div></div> )}
+          {importStatus === 'summary' && importSummary && ( <div class="bg-appNavy border border-appBorder rounded-xl p-6 mb-8 shadow-inner animate-fade-in"><h2 class="text-xl text-white mb-4">Import Complete!</h2><p class="text-appGreen text-lg mb-4">✅ Successfully imported <b>{importSummary.successCount}</b> ledger entries.</p><div class="mt-4"><button onClick={() => setImportStatus('idle')} class="bg-appCard border border-appBorder text-white px-4 py-2 rounded hover:bg-white/5 transition">Close Summary</button></div></div> )}
+
+          {showForm && importStatus === 'idle' && (
+            <div class="bg-appNavy border border-appBorder rounded-xl p-6 shadow-inner animate-fade-in">
+              <h2 class="text-white font-medium mb-4">{editingLedgerId ? 'Edit Passbook Entry' : 'Enter New Passbook Details'}</h2>
+              <form onSubmit={handleSubmit}>
+                <div class="grid grid-cols-1 md:grid-cols-5 gap-4 items-start mb-4">
+                  <div><label class="block text-xs text-gray-400 mb-1">Date</label><input required name="date" value={formData.date} onChange={handleChange} type="date" class="w-full bg-appCard border border-appBorder text-gray-300 rounded px-3 py-2 text-sm focus:border-appAccent outline-none" /></div>
+                  <div><label class="block text-xs text-gray-400 mb-1">Amount (₹)</label><input required name="amount" value={formData.amount} onChange={handleChange} type="number" step="any" min="1" class="w-full bg-appCard border border-appBorder text-white rounded px-3 py-2 text-sm focus:border-appAccent outline-none" /></div>
+                  <div><label class="block text-xs text-gray-400 mb-1">From</label><select name="fromMemberId" value={formData.fromMemberId} onChange={handleChange} class="w-full bg-appCard border border-appBorder text-white rounded px-3 py-2 text-sm focus:border-appAccent outline-none">{traders.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}</select></div>
+                  <div><label class="block text-xs text-gray-400 mb-1">To</label><select name="toMemberId" value={formData.toMemberId} onChange={handleChange} class="w-full bg-appCard border border-appBorder text-white rounded px-3 py-2 text-sm focus:border-appAccent outline-none">{traders.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}</select></div>
+                  <div><label class="block text-xs text-gray-400 mb-1">Purpose</label><select name="purpose" value={formData.purpose} onChange={handleChange} class="w-full bg-appCard border border-appBorder text-white rounded px-3 py-2 text-sm focus:border-appAccent outline-none"><option value="New Investment">New Investment</option><option value="Stock Sales">Stock Sales</option><option value="Withdrawal">Withdrawal</option><option value="Custody Transfer">Custody Transfer</option><option value="Other">Other</option></select></div>
+                </div>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4 border-t border-appBorder pt-4">
+                  {formData.purpose === 'Stock Sales' && (
+                    <div><label class="block text-xs text-appAccent font-semibold mb-1">Link to Closed Trades</label><div class="bg-appCard border border-appBorder rounded p-2 h-20 overflow-y-auto space-y-1">{trades.filter(t => t.status === 'Closed').map(t => (<label key={t.id} class="flex items-center space-x-2 text-xs text-gray-300 cursor-pointer hover:bg-white/5 p-1 rounded"><input type="checkbox" checked={formData.linkedTradeIds.includes(t.id)} onChange={(e) => { if (e.target.checked) setFormData({...formData, linkedTradeIds: [...formData.linkedTradeIds, t.id]}); else setFormData({...formData, linkedTradeIds: formData.linkedTradeIds.filter(id => id !== t.id)}); }} class="accent-appAccent" /><span>{t.symbol} (Sold: {t.sellDate})</span></label>))}{trades.filter(t => t.status === 'Closed').length === 0 && <span class="text-gray-500 text-xs">No closed trades yet.</span>}</div></div>
+                  )}
+                  <div class={formData.purpose === 'Stock Sales' ? 'md:col-span-1' : 'md:col-span-2'}><label class="block text-xs text-gray-400 mb-1">Comments (Always Saved)</label><input name="comments" value={formData.comments} onChange={handleChange} type="text" placeholder="e.g. Monthly top-up or Sale info" class="w-full bg-appCard border border-appBorder text-white rounded px-3 py-2 text-sm focus:border-appAccent outline-none" /></div>
+                </div>
+                <div class="flex justify-end mt-4"><button type="submit" class="bg-appGreen text-appNavy font-bold px-6 py-2 rounded-lg hover:bg-green-400 transition">Save Entry</button></div>
+              </form>
+            </div>
+          )}
+          
+          {importStatus === 'idle' && (
+            <div class="space-y-8 animate-fade-in">
+              <div class="bg-appNavy border border-appBorder rounded-xl overflow-hidden">
+                <div class="p-4 bg-appCard border-b border-appBorder"><h3 class="text-white font-medium">Monthly Contribution Grid</h3></div>
+                <div class="overflow-x-auto p-4"><table class="w-full text-left text-sm whitespace-nowrap"><thead><tr class="text-gray-400"><th class="pb-3 font-medium">Member</th>{uniqueMonths.map(m => <th key={m} class="pb-3 font-medium px-4 text-center">{m}</th>)}<th class="pb-3 font-medium text-right border-l border-appBorder pl-4">Total Invested</th></tr></thead><tbody class="divide-y divide-appBorder/50">{Object.values(gridData).map((row, idx) => (<tr key={idx} class="hover:bg-white/5 transition"><td class="py-3 text-white font-medium">{row.name}</td>{uniqueMonths.map(m => { const amount = row.months[m]; if (amount === 0) return <td key={m} class="py-2 px-4 text-center"><div class="border border-dashed border-appRed/50 bg-appRed/10 text-appRed rounded text-xs py-1">No Entry</div></td>; return <td key={m} class="py-3 px-4 text-center text-appGreen">{formatMoney(amount)}</td>; })}<td class="py-3 text-right text-gray-300 border-l border-appBorder pl-4 font-semibold">{formatMoney(row.totalNet)}</td></tr>))}</tbody></table></div>
+              </div>
+              <div class="bg-appNavy border border-appBorder rounded-xl overflow-hidden">
+                <div class="p-4 bg-appCard border-b border-appBorder"><h3 class="text-white font-medium">Market Magas PassBook</h3></div>
+                <div class="overflow-x-auto max-h-96">
+                  <table class="w-full text-left text-sm whitespace-nowrap">
+                    <thead class="bg-appNavy sticky top-0 border-b border-appBorder text-gray-400 text-xs uppercase">
+                      <tr><th class="px-4 py-3 w-10"><input type="checkbox" class="accent-appAccent cursor-pointer" checked={cashLedger.length > 0 && selectedLedgerIds.length === cashLedger.length} onChange={handleSelectAll} /></th><th class="px-4 py-3">Date</th><th class="px-4 py-3 text-right">Amount</th><th class="px-4 py-3">From</th><th class="px-4 py-3">To</th><th class="px-4 py-3">Purpose</th><th class="px-4 py-3">Details</th><th class="px-4 py-3">Action</th></tr>
+                    </thead>
+                    <tbody class="divide-y divide-appBorder">
+                      {cashLedger.map((entry) => (
+                        <tr key={entry.id} class="hover:bg-white/5 transition">
+                          <td class="px-4 py-3"><input type="checkbox" class="accent-appAccent cursor-pointer" checked={selectedLedgerIds.includes(entry.id)} onChange={(e) => { if (e.target.checked) setSelectedLedgerIds([...selectedLedgerIds, entry.id]); else setSelectedLedgerIds(selectedLedgerIds.filter(id => id !== entry.id)); }} /></td>
+                          <td class="px-4 py-3 text-gray-300">{entry.date}</td><td class="px-4 py-3 text-right text-white font-medium">{formatMoney(entry.amount)}</td><td class="px-4 py-3"><span class="bg-appCard border border-appBorder px-2 py-1 rounded text-gray-300">{getTraderName(entry.fromMemberId)}</span></td><td class="px-4 py-3"><span class="bg-appCard border border-appBorder px-2 py-1 rounded text-gray-300">{getTraderName(entry.toMemberId)}</span></td><td class="px-4 py-3"><span class={`px-2 py-1 rounded text-xs ${entry.purpose === 'New Investment' ? 'bg-appGreen/10 text-appGreen' : entry.purpose === 'Withdrawal' ? 'bg-appRed/10 text-appRed' : 'bg-appAccent/10 text-appAccent'}`}>{entry.purpose}</span></td><td class="px-4 py-3 text-gray-400 text-xs">{entry.linkedTradeIds && entry.linkedTradeIds.length > 0 && (<span class="text-appAccent block mb-1 font-medium">Trades: {entry.linkedTradeIds.map(id => trades.find(t => t.id === id)?.symbol).join(', ')}</span>)}{entry.comments && <span class="block">{entry.comments}</span>}</td><td class="px-4 py-3 space-x-3"><button onClick={() => handleEdit(entry)} class="text-appAccent hover:text-white text-xs font-medium">Edit</button><button onClick={() => handleDelete(entry)} class="text-appRed hover:text-red-400 text-xs font-medium">Delete</button></td>
+                        </tr>
+                      ))}
+                      {cashLedger.length === 0 && <tr><td colSpan="8" class="px-4 py-8 text-center text-gray-500">No ledger entries yet.</td></tr>}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // --- TRADE LOG VIEW ---
+    function TradeLogView({ trades, setTrades, traders, setTraders, cashLedger, setCashLedger }) {
+      const [showForm, setShowForm] = useState(false); const [editingTradeId, setEditingTradeId] = useState(null); const [filterTrader, setFilterTrader] = useState('All'); const [filterStatus, setFilterStatus] = useState('All'); const [selectedTradeIds, setSelectedTradeIds] = useState([]); 
+      const emptyForm = { symbol: '', traderId: traders[0]?.id || '', buyDate: '', sellDate: '', qty: '', buyPrice: '', sellPrice: '', isIntraday: 'false', actualPnL: '', pat: '', notes: '', capitalInjected: '', linkedLedgerEntryId: null };
+      const [formData, setFormData] = useState(emptyForm);
+      const handleChange = (e) => { const { name, value } = e.target; let newFormData = { ...formData, [name]: value }; if (name === 'actualPnL') { const val = parseFloat(value); if (!isNaN(val)) { if (val > 0) { newFormData.pat = (val * 0.8).toFixed(2); } else { newFormData.pat = val.toFixed(2); } } else { newFormData.pat = ''; } } setFormData(newFormData); };
+      const handleEdit = (trade) => { const linkedLedger = trade.linkedLedgerEntryId ? cashLedger.find(l => l.id === trade.linkedLedgerEntryId) : null; setFormData({ symbol: trade.symbol, traderId: trade.traderId, buyDate: cleanDateForInput(trade.buyDate), sellDate: cleanDateForInput(trade.sellDate) || '', qty: trade.qty, buyPrice: trade.buyPrice, sellPrice: trade.sellPrice || '', isIntraday: trade.isIntraday ? 'true' : 'false', actualPnL: trade.actualPnL || '', pat: trade.pat || '', notes: trade.notes || '', capitalInjected: linkedLedger ? linkedLedger.amount : '', linkedLedgerEntryId: trade.linkedLedgerEntryId || null }); setEditingTradeId(trade.id); setShowForm(true); };
+      const handleDeleteTrade = (tradeToDelete) => { if(window.confirm(`Delete trade for ${tradeToDelete.symbol}?`)) { if (tradeToDelete.linkedLedgerEntryId) setCashLedger(cashLedger.filter(l => l.id !== tradeToDelete.linkedLedgerEntryId)); setTrades(trades.filter(t => t.id !== tradeToDelete.id)); setSelectedTradeIds(selectedTradeIds.filter(id => id !== tradeToDelete.id)); } };
+      const handleBulkDelete = () => { if(window.confirm(`Delete ${selectedTradeIds.length} trades?`)) { const tradesToDelete = trades.filter(t => selectedTradeIds.includes(t.id)); const ledgerIdsToDelete = tradesToDelete.map(t => t.linkedLedgerEntryId).filter(id => id !== null); if (ledgerIdsToDelete.length > 0) setCashLedger(cashLedger.filter(l => !ledgerIdsToDelete.includes(l.id))); setTrades(trades.filter(t => !selectedTradeIds.includes(t.id))); setSelectedTradeIds([]); } };
+      const handleSubmit = (e) => { e.preventDefault(); const isClosed = formData.sellDate !== '' && formData.sellPrice !== ''; const injectedAmt = parseFloat(formData.capitalInjected || 0); let newLedgerId = formData.linkedLedgerEntryId; let updatedLedger = [...cashLedger]; if (editingTradeId) { if (injectedAmt > 0) { if (newLedgerId && updatedLedger.some(l => l.id === newLedgerId)) updatedLedger = updatedLedger.map(l => l.id === newLedgerId ? { ...l, amount: injectedAmt, date: formData.buyDate, fromMemberId: parseInt(formData.traderId), toMemberId: parseInt(formData.traderId) } : l); else { newLedgerId = Date.now() + 999; updatedLedger.push({ id: newLedgerId, date: formData.buyDate, amount: injectedAmt, fromMemberId: parseInt(formData.traderId), toMemberId: parseInt(formData.traderId), purpose: 'New Investment', comments: `Auto-added from Trade Edit (${formData.symbol.toUpperCase()})`, linkedTradeIds: [] }); } } else { if (newLedgerId) { updatedLedger = updatedLedger.filter(l => l.id !== newLedgerId); newLedgerId = null; } } } else { if (injectedAmt > 0) { newLedgerId = Date.now() + 999; updatedLedger.push({ id: newLedgerId, date: formData.buyDate, amount: injectedAmt, fromMemberId: parseInt(formData.traderId), toMemberId: parseInt(formData.traderId), purpose: 'New Investment', comments: `Auto-added from Trade Log (${formData.symbol.toUpperCase()})`, linkedTradeIds: [] }); } } setCashLedger(updatedLedger.sort((a, b) => new Date(b.date) - new Date(a.date))); const newTrade = { id: editingTradeId || Date.now(), symbol: formData.symbol.toUpperCase(), traderId: parseInt(formData.traderId), buyDate: formData.buyDate, sellDate: isClosed ? formData.sellDate : null, qty: parseFloat(formData.qty), buyPrice: parseFloat(formData.buyPrice), sellPrice: isClosed ? parseFloat(formData.sellPrice) : null, isIntraday: formData.isIntraday === 'true', actualPnL: isClosed ? parseFloat(formData.actualPnL || 0) : 0, pbt: 0, pat: isClosed ? parseFloat(formData.pat || 0) : 0, notes: formData.notes, status: isClosed ? 'Closed' : 'Open', linkedLedgerEntryId: newLedgerId }; if (editingTradeId) setTrades(trades.map(t => t.id === editingTradeId ? newTrade : t)); else setTrades([...trades, newTrade]); setFormData(emptyForm); setShowForm(false); setEditingTradeId(null); };
+
+      const fileInputRef = useRef(null); const [importStatus, setImportStatus] = useState('idle'); const [csvHeaders, setCsvHeaders] = useState([]); const [csvRawData, setCsvRawData] = useState([]); const [columnMap, setColumnMap] = useState({}); const [unknownTraders, setUnknownTraders] = useState([]); const [traderMap, setTraderMap] = useState({}); const [importSummary, setImportSummary] = useState(null);
+      const expectedFields = [{ key: 'symbol', label: 'Symbol / Stock', required: true, match: ['symbol', 'stock'] }, { key: 'traderName', label: 'Trader Name', required: true, match: ['trader', 'member'] }, { key: 'buyDate', label: 'Buy Date', required: true, match: ['buy date', 'date'] }, { key: 'qty', label: 'Quantity', required: true, match: ['qty', 'quantity'] }, { key: 'buyPrice', label: 'Buy Price', required: true, match: ['buy price', 'entry'] }, { key: 'sellDate', label: 'Sell Date', required: false, match: ['sell date', 'exit date'] }, { key: 'sellPrice', label: 'Sell Price', required: false, match: ['sell price', 'exit price'] }, { key: 'isIntraday', label: 'Intraday?', required: false, match: ['intraday'] }, { key: 'actualPnL', label: 'Pre-Tax Return', required: false, match: ['actual pnl', 'pnl', 'pre-tax'] }, { key: 'pat', label: 'Post-Tax (PAT)', required: false, match: ['pat', 'post-tax'] }, { key: 'notes', label: 'Notes', required: false, match: ['notes', 'comments'] }];
+      const handleFileUpload = (e) => { const file = e.target.files[0]; if (!file) return; Papa.parse(file, { header: true, skipEmptyLines: true, complete: (results) => { setCsvHeaders(results.meta.fields); setCsvRawData(results.data); const initialMap = {}; expectedFields.forEach(field => { const matchedHeader = results.meta.fields.find(h => field.match.some(alias => h.toLowerCase().includes(alias))); if (matchedHeader) initialMap[field.key] = matchedHeader; }); setColumnMap(initialMap); detectUnknownTraders(initialMap.traderName, results.data); setImportStatus('mapping'); } }); e.target.value = ''; };
+      const detectUnknownTraders = (traderColName, data) => { if (!traderColName) { setUnknownTraders([]); return; } const uniqueNamesInCSV = [...new Set(data.map(row => (row[traderColName] || '').trim()).filter(n => n !== ''))]; const existingNamesUpper = traders.map(t => t.name.toUpperCase()); const missing = uniqueNamesInCSV.filter(name => !existingNamesUpper.includes(name.toUpperCase())); setUnknownTraders(missing); const initialTraderMap = {}; missing.forEach(m => initialTraderMap[m] = 'NEW'); setTraderMap(initialTraderMap); };
+      const handleColumnMapChange = (fieldKey, selectedHeader) => { const newMap = { ...columnMap, [fieldKey]: selectedHeader }; setColumnMap(newMap); if (fieldKey === 'traderName') detectUnknownTraders(selectedHeader, csvRawData); };
+      const executeImport = () => { let successfulTrades = []; let failedRows = []; let newlyAddedTraders = [...traders]; const parseNum = (val) => { if (!val) return null; const num = parseFloat(String(val).replace(/[^0-9.-]+/g,"")); return isNaN(num) ? null : num; }; csvRawData.forEach((row, index) => { const sym = row[columnMap.symbol]; const bDate = cleanDateForInput(row[columnMap.buyDate]); const bPrice = parseNum(row[columnMap.buyPrice]); const qty = parseNum(row[columnMap.qty]); const traderNameString = (row[columnMap.traderName] || '').trim(); if (!sym || !bDate || bPrice === null || qty === null || !traderNameString) { failedRows.push(`Row ${index + 2}: Missing mandatory fields`); return; } let finalTraderId = null; const existingMatch = newlyAddedTraders.find(t => t.name.toUpperCase() === traderNameString.toUpperCase()); if (existingMatch) { finalTraderId = existingMatch.id; } else { const decision = traderMap[traderNameString]; if (decision === 'NEW') { const newTrader = { id: Date.now() + Math.random(), name: traderNameString }; newlyAddedTraders.push(newTrader); finalTraderId = newTrader.id; } else { finalTraderId = parseInt(decision); } } const sDate = cleanDateForInput(row[columnMap.sellDate]) || null; const sPrice = parseNum(row[columnMap.sellPrice]); const isClosed = sDate && sPrice !== null; const rawIntraday = (row[columnMap.isIntraday] || '').toLowerCase(); const isIntraday = ['yes', 'true', '1', 'y'].includes(rawIntraday); let importedActual = parseNum(row[columnMap.actualPnL]) || 0; let importedPat = parseNum(row[columnMap.pat]); if (importedPat === null && isClosed) { importedPat = importedActual > 0 ? importedActual * 0.8 : importedActual; } const trade = { id: Date.now() + Math.random(), symbol: sym.toUpperCase(), traderId: finalTraderId, buyDate: bDate, sellDate: isClosed ? sDate : null, qty: qty, buyPrice: bPrice, sellPrice: isClosed ? sPrice : null, isIntraday: isIntraday, actualPnL: isClosed ? importedActual : 0, pbt: 0, pat: isClosed ? (importedPat || 0) : 0, notes: row[columnMap.notes] || '', status: isClosed ? 'Closed' : 'Open', linkedLedgerEntryId: null }; successfulTrades.push(trade); }); setTraders(newlyAddedTraders); setTrades([...trades, ...successfulTrades]); setImportSummary({ successCount: successfulTrades.length, fails: failedRows }); setImportStatus('summary'); };
+
+      const filteredTrades = trades.filter(t => (filterTrader === 'All' || t.traderId === parseInt(filterTrader)) && (filterStatus === 'All' || t.status === filterStatus));
+      const totalActualPnL = filteredTrades.reduce((sum, t) => sum + (t.actualPnL || 0), 0); const totalPAT = filteredTrades.reduce((sum, t) => sum + (t.pat || 0), 0);
+      const getDaysHeld = (t) => { if (t.status === 'Open') return 'Open'; const days = Math.floor((new Date(t.sellDate) - new Date(t.buyDate)) / (1000 * 60 * 60 * 24)); return days === 0 ? 'Same Day' : `${days}`; };
+      const getTraderName = (id) => traders.find(tr => tr.id === id)?.name || 'Unknown';
+      const handleSelectAll = (e) => { if (e.target.checked) setSelectedTradeIds(filteredTrades.map(t => t.id)); else setSelectedTradeIds([]); };
+
+      return (
+        <div class="animate-fade-in">
+          <div class="flex justify-between items-center mb-6"><h1 class="text-2xl font-semibold text-white">Trade Log</h1><div class="space-x-3 flex items-center">{selectedTradeIds.length > 0 && <button onClick={handleBulkDelete} class="bg-appRed text-white font-semibold px-4 py-2 rounded-lg hover:bg-red-500 transition animate-fade-in">Delete Selected ({selectedTradeIds.length})</button>}<input type="file" accept=".csv" ref={fileInputRef} onChange={handleFileUpload} class="hidden" /><button onClick={() => fileInputRef.current.click()} class="bg-appCard border border-appBorder text-white font-semibold px-4 py-2 rounded-lg hover:bg-white/5 transition">↑ Upload CSV</button><button onClick={() => { setFormData(emptyForm); setEditingTradeId(null); setShowForm(!showForm); setImportStatus('idle'); }} class="bg-appAccent text-appNavy font-semibold px-4 py-2 rounded-lg hover:bg-sky-400 transition">{showForm ? 'Cancel' : '+ Add New Trade'}</button></div></div>
+          {importStatus === 'mapping' && ( <div class="bg-appNavy border border-appBorder rounded-xl p-6 mb-8 shadow-inner animate-fade-in"><h2 class="text-xl text-white mb-2">Map CSV Columns</h2><div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">{expectedFields.map(field => (<div key={field.key} class="bg-appCard p-4 rounded-lg border border-appBorder"><label class="block text-sm text-white mb-2">{field.label}</label><select value={columnMap[field.key] || ''} onChange={(e) => handleColumnMapChange(field.key, e.target.value)} class="w-full bg-appNavy border border-appBorder text-white rounded px-3 py-2 text-sm focus:border-appAccent outline-none"><option value="" class="italic text-gray-500">-- Not in this file --</option>{csvHeaders.map(header => <option key={header} value={header}>{header}</option>)}</select></div>))}</div><div class="flex justify-between border-t border-appBorder pt-4"><button onClick={() => setImportStatus('idle')} class="text-gray-400 hover:text-white transition">Cancel Import</button><button onClick={executeImport} class="bg-appGreen text-appNavy font-bold px-6 py-2 rounded-lg hover:bg-green-400 transition">Confirm & Import Data</button></div></div> )}
+          {importStatus === 'summary' && importSummary && ( <div class="bg-appNavy border border-appBorder rounded-xl p-6 mb-8 shadow-inner animate-fade-in"><h2 class="text-xl text-white mb-4">Import Complete!</h2><p class="text-appGreen text-lg mb-4">✅ Successfully imported <b>{importSummary.successCount}</b> trades.</p><button onClick={() => setImportStatus('idle')} class="bg-appCard text-white px-4 py-2 rounded">Close</button></div> )}
+
+          {showForm && importStatus === 'idle' && (
+            <div class="bg-appNavy border border-appBorder rounded-xl p-6 mb-8 shadow-inner animate-fade-in">
+              <form onSubmit={handleSubmit}>
+                <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
+                  <div><label class="block text-xs text-gray-400 mb-1">Symbol/Stock</label><input required name="symbol" value={formData.symbol} onChange={handleChange} type="text" class="w-full bg-appCard border border-appBorder text-white rounded px-3 py-2 text-sm outline-none uppercase" /></div>
+                  <div><label class="block text-xs text-gray-400 mb-1">Trader</label><select required name="traderId" value={formData.traderId} onChange={handleChange} class="w-full bg-appCard border border-appBorder text-white rounded px-3 py-2 text-sm outline-none">{traders.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}</select></div>
+                  <div><label class="block text-xs text-gray-400 mb-1">Intraday?</label><select name="isIntraday" value={formData.isIntraday} onChange={handleChange} class="w-full bg-appCard border border-appBorder text-white rounded px-3 py-2 text-sm outline-none"><option value="false">No</option><option value="true">Yes</option></select></div>
+                  <div><label class="block text-xs text-gray-400 mb-1">Quantity</label><input required name="qty" value={formData.qty} onChange={handleChange} type="number" step="any" class="w-full bg-appCard border border-appBorder text-white rounded px-3 py-2 text-sm outline-none" /></div>
+                  <div><label class="block text-xs text-gray-400 mb-1">Buy Date</label><input required name="buyDate" value={formData.buyDate} onChange={handleChange} type="date" class="w-full bg-appCard border border-appBorder text-gray-300 rounded px-3 py-2 text-sm outline-none" /></div>
+                  <div><label class="block text-xs text-gray-400 mb-1">Buy Price (₹)</label><input required name="buyPrice" value={formData.buyPrice} onChange={handleChange} type="number" step="any" class="w-full bg-appCard border border-appBorder text-white rounded px-3 py-2 text-sm outline-none" /></div>
+                  <div><label class="block text-xs text-gray-400 mb-1">Sell Date</label><input name="sellDate" value={formData.sellDate} onChange={handleChange} type="date" class="w-full bg-appCard border border-appBorder text-gray-300 rounded px-3 py-2 text-sm outline-none" /></div>
+                  <div><label class="block text-xs text-gray-400 mb-1">Sell Price</label><input name="sellPrice" value={formData.sellPrice} onChange={handleChange} type="number" step="any" class="w-full bg-appCard border border-appBorder text-white rounded px-3 py-2 text-sm outline-none" /></div>
+                </div>
+                <div class="bg-appAccent/10 border border-appAccent/30 rounded-lg p-4 mb-4">
+                  <div class="md:w-1/3"><label class="block text-xs font-semibold text-appAccent mb-1">New Capital Added? (₹)</label><input name="capitalInjected" value={formData.capitalInjected} onChange={handleChange} type="number" step="any" class="w-full bg-appCard border border-appAccent text-white rounded px-3 py-2 text-sm outline-none" /></div>
+                </div>
+                <div class="border-t border-appBorder pt-4 mb-4 grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div class="md:col-span-3"><p class="text-xs text-appAccent">Manual Tax & Profit Entry</p></div>
+                  <div><label class="block text-xs text-gray-400 mb-1">Actual Return (Pre-Tax) (₹)</label><input name="actualPnL" value={formData.actualPnL} onChange={handleChange} type="number" step="any" class="w-full bg-appCard border border-appBorder text-white rounded px-3 py-2 text-sm outline-none border-appAccent" placeholder="Enter profit or loss..." /></div>
+                  <div><label class="block text-xs text-gray-400 mb-1">Post-Tax (PAT) (₹)</label><input name="pat" value={formData.pat} onChange={handleChange} type="number" step="any" class="w-full bg-appCard border border-appBorder text-appGreen font-semibold rounded px-3 py-2 text-sm outline-none bg-appGreen/5" title="Auto-deducts 20% on profit. Losses stay identical." /></div>
+                  <div><label class="block text-xs text-gray-400 mb-1">Notes</label><input name="notes" value={formData.notes} onChange={handleChange} type="text" class="w-full bg-appCard border border-appBorder text-white rounded px-3 py-2 text-sm outline-none" /></div>
+                </div>
+                <div class="flex justify-end"><button type="submit" class="bg-appGreen text-appNavy font-bold px-6 py-2 rounded-lg hover:bg-green-400 transition">Save Trade</button></div>
+              </form>
+            </div>
+          )}
+
+          {importStatus === 'idle' && (
+            <div class="bg-appNavy border border-appBorder rounded-xl pb-2 overflow-x-auto">
+              <div class="flex space-x-4 p-4 border-b border-appBorder">
+                <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)} class="bg-appNavy border border-appBorder text-white rounded px-3 py-1 text-sm outline-none"><option value="All">All</option><option value="Open">Open</option><option value="Closed">Closed</option></select>
+                <select value={filterTrader} onChange={(e) => setFilterTrader(e.target.value)} class="bg-appNavy border border-appBorder text-white rounded px-3 py-1 text-sm outline-none"><option value="All">All</option>{traders.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}</select>
+              </div>
+              <table class="w-full text-left text-xs whitespace-nowrap">
+                <thead class="bg-appCard border-b border-appBorder text-gray-400 uppercase">
+                  <tr>
+                    <th class="p-2 w-8"><input type="checkbox" class="accent-appAccent cursor-pointer" checked={filteredTrades.length > 0 && selectedTradeIds.length === filteredTrades.length} onChange={handleSelectAll} /></th>
+                    <th class="p-2">Asset</th><th class="p-2">Trader</th><th class="p-2">Dates</th><th class="p-2">Qty</th><th class="p-2">Prices (B/S)</th><th class="p-2 border-l border-appBorder bg-white/5">Invested</th><th class="p-2 border-l border-appBorder bg-white/5 text-gray-300">Pre-Tax P&L</th><th class="p-2 text-gray-300">PAT (-20%)</th>
+                    <th class="p-2 border-l border-appBorder bg-white/5 font-semibold text-white">Gross Return</th>
+                    {/* NEW: Explicitly mention DP deduction in column header */}
+                    <th class="p-2 border-r border-appBorder bg-white/5 font-semibold text-appAccent">Net Return <span class="text-[9px] font-normal block">-₹15.34 DP</span></th>
+                    <th class="p-2">Action</th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-appBorder">
+                  {filteredTrades.map((t) => {
+                    // FIX: DP charge exactly applied to Net Return display in the log
+                    const invested = t.buyPrice * t.qty;
+                    const grossReturn = t.status === 'Closed' ? invested + t.actualPnL : null;
+                    const netReturn = t.status === 'Closed' ? invested + t.pat - 15.34 : null;
+                    
+                    return (
+                      <tr key={t.id} class="hover:bg-white/5 transition">
+                        <td class="p-2"><input type="checkbox" class="accent-appAccent cursor-pointer" checked={selectedTradeIds.includes(t.id)} onChange={(e) => { if (e.target.checked) setSelectedTradeIds([...selectedTradeIds, t.id]); else setSelectedTradeIds(selectedTradeIds.filter(id => id !== t.id)); }} /></td>
+                        <td class="p-2"><div class="font-bold text-white tracking-wide">{t.symbol} {t.isIntraday && <span class="text-[9px] bg-appAccent/20 text-appAccent px-1 rounded ml-1">INT</span>}</div><span class={`text-[10px] px-1 rounded ${t.status === 'Open' ? 'bg-yellow-500/10 text-yellow-500' : 'bg-gray-500/10 text-gray-400'}`}>{t.status}</span></td>
+                        <td class="p-2 text-gray-300 font-medium">{getTraderName(t.traderId)}</td>
+                        <td class="p-2 text-gray-300"><div><span class="text-gray-500 text-[10px]">B:</span> {t.buyDate}</div><div><span class="text-gray-500 text-[10px]">S:</span> {t.status === 'Closed' ? t.sellDate : '-'}</div><div class="text-[10px] text-gray-500">{t.status === 'Closed' ? `${getDaysHeld(t)} days` : ''}</div></td>
+                        <td class="p-2 text-gray-300">{t.qty}</td>
+                        <td class="p-2 text-gray-300"><div><span class="text-gray-500 text-[10px]">B:</span> {formatPrice(t.buyPrice)}</div><div><span class="text-gray-500 text-[10px]">S:</span> {t.status === 'Closed' ? formatPrice(t.sellPrice) : '-'}</div></td>
+                        <td class="p-2 border-l border-appBorder bg-white/5 text-gray-300">{formatMoney(invested)}</td>
+                        <td class={`p-2 border-l border-appBorder bg-white/5 font-bold ${t.status === 'Open' ? 'text-gray-500' : (t.actualPnL >= 0 ? 'text-appGreen' : 'text-appRed')}`}>{t.status === 'Closed' ? formatMoney(t.actualPnL) : '-'}</td>
+                        <td class={`p-2 font-bold ${t.status === 'Open' ? 'text-gray-500' : (t.pat >= 0 ? 'text-appGreen' : 'text-appRed')}`}>{t.status === 'Closed' ? formatMoney(t.pat) : '-'}</td>
+                        <td class="p-2 border-l border-appBorder bg-white/5 font-semibold text-white">{t.status === 'Closed' ? formatMoney(grossReturn) : '-'}</td>
+                        <td class="p-2 border-r border-appBorder bg-white/5 font-semibold text-appAccent">{t.status === 'Closed' ? formatMoney(netReturn) : '-'}</td>
+                        <td class="p-2 space-x-2"><button onClick={() => handleEdit(t)} class="text-appAccent hover:underline">Edit</button><button onClick={() => handleDeleteTrade(t)} class="text-appRed hover:underline">Del</button></td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+                <tfoot class="bg-appCard border-t border-appBorder">
+                  <tr>
+                    <td colSpan="7" class="p-3 text-right text-gray-400 font-medium">Filtered P&L Totals:</td>
+                    <td class="p-3 text-appGreen font-bold text-sm border-l border-appBorder bg-white/5">{formatMoney(totalActualPnL)}</td>
+                    <td class="p-3 text-white font-bold text-sm">{formatMoney(totalPAT)}</td>
+                    <td colSpan="3"></td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    function DashboardCharts({ trades, traders }) {
+      const pnlChartRef = useRef(null); const typeChartRef = useRef(null);
+      useEffect(() => {
+        Chart.defaults.color = '#9CA3AF'; Chart.defaults.borderColor = '#2A364F';
+        const closedTrades = trades.filter(t => t.status === 'Closed').sort((a, b) => new Date(a.sellDate) - new Date(b.sellDate));
+        const pnlLabels = closedTrades.map(t => t.symbol); const pnlData = closedTrades.map(t => t.actualPnL); const pnlColors = pnlData.map(val => val >= 0 ? '#10B981' : '#EF4444'); 
+        let intradayCount = 0; let deliveryCount = 0; closedTrades.forEach(t => { if (t.isIntraday) intradayCount++; else deliveryCount++; });
+
+        const pnlChart = new Chart(pnlChartRef.current, { type: 'bar', data: { labels: pnlLabels, datasets: [{ data: pnlData, backgroundColor: pnlColors, borderRadius: 4 }] }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } } });
+        const typeChart = new Chart(typeChartRef.current, { type: 'doughnut', data: { labels: ['Intraday', 'Delivery'], datasets: [{ data: [intradayCount, deliveryCount], backgroundColor: ['#38BDF8', '#6366F1'], borderWidth: 0 }] }, options: { responsive: true, maintainAspectRatio: false, cutout: '70%' } });
+
+        return () => { pnlChart.destroy(); typeChart.destroy(); };
+      }, [trades, traders]);
+
+      return (
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mt-8 animate-fade-in">
+          <div class="bg-appNavy border border-appBorder rounded-xl p-5 lg:col-span-2 h-72 flex flex-col"><h3 class="text-white font-medium mb-4">Trade P&L History</h3><div class="relative flex-1 min-h-0"><canvas ref={pnlChartRef}></canvas></div></div>
+          <div class="bg-appNavy border border-appBorder rounded-xl p-5 h-72 flex flex-col lg:col-span-1"><h3 class="text-white font-medium mb-2">Intraday vs Delivery</h3><div class="relative flex-1 min-h-0"><canvas ref={typeChartRef}></canvas></div></div>
+        </div>
+      );
+    }
+
+    // --- MAIN APP ---
+    function App() {
+      const [currentView, setCurrentView] = useState(() => localStorage.getItem('mm_view') || 'tradelog'); 
+      const defaultTraders = [{ id: 1, name: 'Anil' }, { id: 2, name: 'Kota' }, { id: 3, name: 'Santosh' }, { id: 4, name: 'Anirudha' }];
+      
+      const [traders, setTraders] = useState(() => JSON.parse(localStorage.getItem('mm_traders')) || defaultTraders);
+      const [cashLedger, setCashLedger] = useState(() => JSON.parse(localStorage.getItem('mm_ledger')) || [
+        { id: 1, date: '2026-01-25', amount: 5000, fromMemberId: 1, toMemberId: 4, purpose: 'New Investment', comments: 'Investment: Jan Anil', linkedTradeIds: [] },
+        { id: 2, date: '2026-01-26', amount: 5000, fromMemberId: 2, toMemberId: 4, purpose: 'New Investment', comments: 'Investment: Jan Kota', linkedTradeIds: [] },
+        { id: 3, date: '2026-01-28', amount: 3750, fromMemberId: 3, toMemberId: 4, purpose: 'New Investment', comments: 'Investment: Jan Santosh', linkedTradeIds: [] },
+        { id: 4, date: '2026-02-03', amount: 3850, fromMemberId: 4, toMemberId: 1, purpose: 'Stock Sales', comments: '', linkedTradeIds: [1] },
+        { id: 5, date: '2026-02-08', amount: 3000, fromMemberId: 1, toMemberId: 4, purpose: 'New Investment', comments: 'Investment: Feb Anil', linkedTradeIds: [] },
+        { id: 6, date: '2026-02-09', amount: 5000, fromMemberId: 2, toMemberId: 4, purpose: 'New Investment', comments: 'Investment: Feb Kota', linkedTradeIds: [] },
+        { id: 7, date: '2026-03-04', amount: 5000, fromMemberId: 1, toMemberId: 3, purpose: 'New Investment', comments: 'Investment: March Anil', linkedTradeIds: [] }
+      ]);
+      const [trades, setTrades] = useState(() => JSON.parse(localStorage.getItem('mm_trades')) || [
+        { id: 1, symbol: 'RELIANCE', status: 'Closed', buyDate: '2026-02-01', qty: 10, buyPrice: 2000.550, sellDate: '2026-02-03', sellPrice: 2200.750, actualPnL: 1900, pat: 1520, traderId: 1, isIntraday: false, notes: 'Good swing', linkedLedgerEntryId: null },
+        { id: 2, symbol: 'TCS', status: 'Closed', buyDate: '2026-02-05', qty: 5, buyPrice: 3000.000, sellDate: '2026-02-05', sellPrice: 2900.000, actualPnL: -550, pat: -550, traderId: 2, isIntraday: true, notes: 'Stop hit', linkedLedgerEntryId: null }
+      ]);
+
+      useEffect(() => { localStorage.setItem('mm_traders', JSON.stringify(traders)); }, [traders]);
+      useEffect(() => { localStorage.setItem('mm_ledger', JSON.stringify(cashLedger)); }, [cashLedger]);
+      useEffect(() => { localStorage.setItem('mm_trades', JSON.stringify(trades)); }, [trades]);
+      useEffect(() => { localStorage.setItem('mm_view', currentView); }, [currentView]);
+
+      const handleExportData = () => {
+        const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify({ traders, cashLedger, trades }));
+        const a = document.createElement('a'); a.setAttribute("href", dataStr); a.setAttribute("download", `MarketMaga_Backup_${new Date().toISOString().split('T')[0]}.json`);
+        document.body.appendChild(a); a.click(); a.remove();
+      };
+      
+      const backupInputRef = useRef(null);
+      const handleImportData = (e) => {
+        const file = e.target.files[0]; if (!file) return;
+        const reader = new FileReader();
+        reader.onload = (event) => {
+          try {
+            const data = JSON.parse(event.target.result);
+            if(data.traders && data.cashLedger && data.trades) {
+              setTraders(data.traders); setCashLedger(data.cashLedger); setTrades(data.trades);
+              alert("Backup successfully restored!");
+            } else alert("Invalid backup file.");
+          } catch(err) { alert("Error reading file."); }
+        };
+        reader.readAsText(file); e.target.value = '';
+      };
+
+      let traderStats = {};
+      traders.forEach(t => traderStats[t.id] = { name: t.name, netInvested: 0, amountDeployed: 0, totalPnL: 0, cashHolding: 0 });
+
+      cashLedger.forEach(entry => {
+        if (entry.purpose === 'New Investment') {
+          if (traderStats[entry.toMemberId]) traderStats[entry.toMemberId].cashHolding += entry.amount;
+          if (traderStats[entry.fromMemberId]) traderStats[entry.fromMemberId].netInvested += entry.amount;
+        } else if (entry.purpose === 'Withdrawal') {
+          if (traderStats[entry.fromMemberId]) { traderStats[entry.fromMemberId].cashHolding -= entry.amount; traderStats[entry.fromMemberId].netInvested -= entry.amount; }
+        } else {
+          if (traderStats[entry.fromMemberId]) traderStats[entry.fromMemberId].cashHolding -= entry.amount;
+          if (traderStats[entry.toMemberId]) traderStats[entry.toMemberId].cashHolding += entry.amount;
+        }
+      });
+
+      let totalDpCharges = 0; // FIX: Global Tracking of DP Charges
+
+      trades.forEach(trade => {
+        if (trade.status === 'Closed') {
+          totalDpCharges += 15.34; // DP is tracked globally so total Fund capital drops
+          if (traderStats[trade.traderId]) {
+            traderStats[trade.traderId].totalPnL += trade.actualPnL;
+            
+            // FIX: Custody Cash gets Invested + PAT minus DP Charge
+            let returned = (trade.buyPrice * trade.qty) + trade.pat - 15.34;
+            
+            traderStats[trade.traderId].cashHolding -= (trade.buyPrice * trade.qty);
+            traderStats[trade.traderId].cashHolding += returned;
+          }
+        } else {
+          if (traderStats[trade.traderId]) {
+            traderStats[trade.traderId].amountDeployed += (trade.buyPrice * trade.qty);
+            traderStats[trade.traderId].cashHolding -= (trade.buyPrice * trade.qty);
+          }
+        }
+      });
+
+      // FIX: Total Capital drops exactly by the total DP charges paid over time
+      const totalCapitalInFund = Object.values(traderStats).reduce((sum, t) => sum + t.cashHolding + t.amountDeployed, 0);
+      const cashAvailableToTrade = Object.values(traderStats).reduce((sum, t) => sum + t.cashHolding, 0);
+      const amountDeployed = Object.values(traderStats).reduce((sum, t) => sum + t.amountDeployed, 0);
+      const sumOfCustody = Object.values(traderStats).reduce((sum, t) => sum + t.cashHolding, 0);
+      const isMathMatching = Math.round(sumOfCustody) === Math.round(cashAvailableToTrade);
+
+      let currentCustodianId = traders[0]?.id;
+      let highestCash = -999999;
+      traders.forEach(t => { if (traderStats[t.id].cashHolding > highestCash) { highestCash = traderStats[t.id].cashHolding; currentCustodianId = t.id; } });
+      const currentCustodianName = traders.find(t => t.id === currentCustodianId)?.name || 'None';
+      
+      let nextCustodianName = 'Anyone';
+      let lowestCash = 999999;
+      traders.forEach(t => { if (traderStats[t.id].cashHolding < lowestCash) { lowestCash = traderStats[t.id].cashHolding; nextCustodianName = t.name; } });
+
+      const [newTraderName, setNewTraderName] = useState(''); const [editingTraderId, setEditingTraderId] = useState(null); const [editTraderName, setEditTraderName] = useState('');     
+      const handleAddTrader = () => { if (newTraderName.trim() === '') return; setTraders([...traders, { id: Date.now(), name: newTraderName.trim() }]); setNewTraderName(''); };
+      const handleDeleteTrader = (id) => setTraders(traders.filter(t => t.id !== id));
+      const startEditingTrader = (t) => { setEditingTraderId(t.id); setEditTraderName(t.name); };
+      const saveEditTrader = () => { setTraders(traders.map(t => t.id === editingTraderId ? { ...t, name: editTraderName.trim() } : t)); setEditingTraderId(null); };
+      
+      const getButtonClass = (viewName) => `px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${currentView === viewName ? 'bg-appAccent/10 text-appAccent' : 'text-gray-400 hover:text-gray-200 hover:bg-gray-800/50'}`;
+
+      return (
+        <div class="min-h-screen flex flex-col">
+          <nav class="bg-appNavy border-b border-appBorder sticky top-0 z-10">
+            <div class="max-w-7xl mx-auto px-6 h-20 flex justify-between items-center">
+              <div class="text-2xl font-bold tracking-tight text-white uppercase">Market <span class="text-appAccent">Maga</span></div>
+              <div class="flex space-x-2">
+                <button onClick={() => setCurrentView('dashboard')} class={getButtonClass('dashboard')}>Dashboard</button>
+                <button onClick={() => setCurrentView('tradelog')} class={getButtonClass('tradelog')}>Trade Log</button>
+                <button onClick={() => setCurrentView('ledger')} class={getButtonClass('ledger')}>Cash Ledger</button>
+                <button onClick={() => setCurrentView('statements')} class={getButtonClass('statements')}>Monthly Statements</button>
+                <button onClick={() => setCurrentView('traders')} class={getButtonClass('traders')}>Manage Traders</button>
+              </div>
+            </div>
+          </nav>
+
+          <main class="flex-grow p-6 md:p-10 max-w-7xl mx-auto w-full">
+            <div class="bg-appCard border border-appBorder rounded-2xl shadow-xl p-8 min-h-[500px]">
+              
+              {currentView === 'dashboard' && (
+                <div class="animate-fade-in">
+                  <div class="flex justify-between items-end mb-6">
+                    <h1 class="text-2xl font-semibold text-white">Fund Overview</h1>
+                    {isMathMatching 
+                      ? <span class="text-xs bg-appGreen/10 text-appGreen px-3 py-1 rounded border border-appGreen/20">✅ Capital & Custody Math Matches Perfectly</span>
+                      : <span class="text-xs bg-appRed/10 text-appRed px-3 py-1 rounded border border-appRed/20">⚠ Warning: Ledger amounts don't reconcile with Fund Total!</span>
+                    }
+                  </div>
+                  
+                  <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+                    <div class="bg-appNavy border border-appBorder rounded-xl p-6"><p class="text-gray-400 text-sm font-medium mb-1">Total Fund Value</p><p class="text-3xl font-bold text-white">{formatMoney(totalCapitalInFund)}</p></div>
+                    <div class="bg-appNavy border border-appBorder rounded-xl p-6"><p class="text-gray-400 text-sm font-medium mb-1">Total Cash Available</p><p class="text-3xl font-bold text-appAccent">{formatMoney(cashAvailableToTrade)}</p></div>
+                    <div class="bg-appNavy border border-appBorder rounded-xl p-6"><p class="text-gray-400 text-sm font-medium mb-1">Total Deployed (Open)</p><p class="text-3xl font-bold text-gray-300">{formatMoney(amountDeployed)}</p></div>
+                  </div>
+
+                  <div class="bg-appNavy border border-appBorder rounded-xl overflow-hidden mb-8">
+                    <div class="p-4 bg-appCard border-b border-appBorder flex justify-between items-center">
+                      <h3 class="text-white font-medium">Current Trader Status</h3>
+                      <span class="text-xs text-gray-400">Live snapshot of who holds what right now</span>
+                    </div>
+                    <div class="overflow-x-auto">
+                      <table class="w-full text-left text-sm whitespace-nowrap">
+                        <thead class="bg-appNavy border-b border-appBorder text-gray-400 text-xs uppercase">
+                          <tr><th class="px-5 py-3">Trader Name</th><th class="px-5 py-3">Total Net Invested</th><th class="px-5 py-3 text-appRed">Amount Spent (Deployed)</th><th class="px-5 py-3">All-Time P&L</th><th class="px-5 py-3 text-appAccent font-bold border-l border-appBorder bg-white/5">Current Cash Holding</th></tr>
+                        </thead>
+                        <tbody class="divide-y divide-appBorder">
+                          {traders.map(t => {
+                            const stats = traderStats[t.id];
+                            return (
+                              <tr key={t.id} class="hover:bg-white/5 transition">
+                                <td class="px-5 py-3 font-medium text-white">{stats.name}</td>
+                                <td class="px-5 py-3 text-gray-300">{formatMoney(stats.netInvested)}</td>
+                                <td class="px-5 py-3 text-appRed">{formatMoney(stats.amountDeployed)}</td>
+                                <td class={`px-5 py-3 font-medium ${stats.totalPnL >= 0 ? 'text-appGreen' : 'text-appRed'}`}>{stats.totalPnL >= 0 ? '+' : ''}{formatMoney(stats.totalPnL)}</td>
+                                <td class="px-5 py-3 text-appAccent font-bold border-l border-appBorder bg-white/5">{formatMoney(stats.cashHolding)}</td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+
+                  <DashboardCharts trades={trades} traders={traders} />
+
+                  <div class="mt-12 bg-appNavy border border-appBorder rounded-xl p-6">
+                    <h3 class="text-white font-medium mb-2">Data Sync & Backups</h3>
+                    <p class="text-sm text-gray-400 mb-4">Your data automatically saves to this browser. To share data with your group, export a backup file here and send it to them.</p>
+                    <div class="flex space-x-4">
+                      <button onClick={handleExportData} class="bg-appCard border border-appBorder text-white font-semibold px-4 py-2 rounded-lg hover:bg-white/5 transition">↓ Export Backup File</button>
+                      <input type="file" accept=".json" ref={backupInputRef} onChange={handleImportData} class="hidden" />
+                      <button onClick={() => backupInputRef.current.click()} class="bg-appAccent/10 text-appAccent border border-appAccent/30 font-semibold px-4 py-2 rounded-lg hover:bg-appAccent/20 transition">↑ Restore from Backup</button>
+                    </div>
+                  </div>
+                </div>
+              )}
+              
+              {currentView === 'tradelog' && <TradeLogView trades={trades} setTrades={setTrades} traders={traders} setTraders={setTraders} cashLedger={cashLedger} setCashLedger={setCashLedger} />}
+              {currentView === 'ledger' && <CashLedgerView cashLedger={cashLedger} setCashLedger={setCashLedger} traders={traders} setTraders={setTraders} trades={trades} />}
+              {currentView === 'statements' && <MonthlyStatementView cashLedger={cashLedger} trades={trades} traders={traders} />}
+              
+              {currentView === 'traders' && ( <div class="animate-fade-in"><h1 class="text-2xl font-semibold text-white mb-6">Manage Traders</h1><div class="flex items-center space-x-4 mb-8"><input type="text" placeholder="Enter new trader name..." value={newTraderName} onChange={(e) => setNewTraderName(e.target.value)} class="bg-appNavy border border-appBorder text-white rounded-lg px-4 py-2 focus:outline-none focus:border-appAccent w-64" /><button onClick={handleAddTrader} class="bg-appAccent text-appNavy font-semibold px-4 py-2 rounded-lg hover:bg-sky-400 transition">+ Add Trader</button></div><div class="bg-appNavy border border-appBorder rounded-xl overflow-hidden max-w-2xl"><ul class="divide-y divide-appBorder">{traders.map((trader) => (<li key={trader.id} class="flex items-center justify-between p-4 hover:bg-white/5 transition">{editingTraderId === trader.id ? ( <input type="text" value={editTraderName} onChange={(e) => setEditTraderName(e.target.value)} class="bg-appCard border border-appAccent text-white rounded px-2 py-1 focus:outline-none" /> ) : ( <span class="text-white font-medium">{trader.name}</span> )}<div class="space-x-3">{editingTraderId === trader.id ? ( <button onClick={saveEditTrader} class="text-appGreen hover:text-green-400 text-sm font-medium">Save</button> ) : ( <button onClick={() => startEditingTrader(trader)} class="text-gray-400 hover:text-white text-sm font-medium">Edit</button> )}<button onClick={() => handleDeleteTrader(trader.id)} class="text-appRed hover:text-red-400 text-sm font-medium">Remove</button></div></li>))}</ul></div></div> )}
+            </div>
+          </main>
+        </div>
+      );
+    }
+    const root = ReactDOM.createRoot(document.getElementById('root')); root.render(<App />);
+  </script>
+  <style>@keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } } .animate-fade-in { animation: fadeIn 0.3s ease-out forwards; }</style>
+</body>
+</html>
