@@ -244,7 +244,7 @@
           drawChart(labels, prices, idealMinPrice, idealMaxPrice, errorMsg || "Simulating Data", true);
         };
 
-        // NEW: Fetch historical data securely from Yahoo Finance via Proxy
+        // Fetch historical data securely from Yahoo Finance via Proxy
         const fetchHistorical = async () => {
           const startUnix = Math.floor(startD.getTime() / 1000);
           const endUnix = Math.floor(endD.getTime() / 1000);
@@ -277,7 +277,7 @@
                     if (price > idealMaxPrice) idealMaxPrice = price;
                 }
               });
-              drawChart(labels, prices, idealMinPrice, idealMaxPrice, "✅ Live Yahoo Historical Data", false);
+              drawChart(labels, prices, idealMinPrice, idealMaxPrice, "✅ Live NSE Historical Data", false);
             } else {
               buildSimulation("Invalid Data Format");
             }
@@ -684,7 +684,7 @@
       const [isAdmin, setIsAdmin] = useState(false);
       const [currentView, setCurrentView] = useState('dashboard'); 
       const [livePrices, setLivePrices] = useState({});
-      const [apiStatusMsg, setApiStatusMsg] = useState("Initializing API...");
+      const [apiStatusMsg, setApiStatusMsg] = useState("Initializing Tracker...");
       
       const defaultTraders = [{ id: 1, name: 'Anil' }, { id: 2, name: 'Kota' }, { id: 3, name: 'Santosh' }, { id: 4, name: 'Anirudha' }];
       
@@ -707,41 +707,45 @@
         return () => { tRef.off(); cRef.off(); trRef.off(); };
       }, []);
 
-      // 🔥 UPGRADED: LIVE OPEN TRADE FETCHER ENGINE (YAHOO FINANCE) 🔥
+      // 🔥 NEW: ROBUST YAHOO FINANCE FETCH ENGINE 🔥
       useEffect(() => {
         const fetchLivePrices = async () => {
           const openTrades = trades.filter(t => t.status === 'Open');
           if(openTrades.length === 0) return;
           
           setApiStatusMsg("Fetching Live NSE Prices...");
-          let newPrices = {};
-          let hasError = false;
-
-          for (let t of openTrades) {
-            try {
-              // Add .NS for National Stock Exchange on Yahoo Finance, routed through free proxy
-              const yfUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${t.symbol}.NS?interval=1m`;
-              const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(yfUrl)}`;
-              
-              const res = await fetch(proxyUrl);
-              const data = await res.json();
-              const parsed = JSON.parse(data.contents);
-              
-              if (parsed.chart && parsed.chart.result && parsed.chart.result.length > 0) {
-                newPrices[t.symbol] = parsed.chart.result[0].meta.regularMarketPrice;
-              } else {
-                hasError = true;
-              }
-            } catch (e) { 
-              hasError = true;
+          try {
+            // Append .NS to explicitly target the National Stock Exchange of India
+            const symbols = [...new Set(openTrades.map(t => `${t.symbol}.NS`))].join(',');
+            
+            // Use Yahoo's reliable V7 Quote endpoint instead of the brittle V8 Chart endpoint
+            const yfUrl = `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${symbols}`;
+            const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(yfUrl)}`;
+            
+            const res = await fetch(proxyUrl);
+            const data = await res.json();
+            const parsed = JSON.parse(data.contents);
+            
+            let newPrices = {};
+            if (parsed && parsed.quoteResponse && parsed.quoteResponse.result) {
+              parsed.quoteResponse.result.forEach(quote => {
+                // Strip the .NS back off so it matches your local trade symbols
+                const cleanSymbol = quote.symbol.replace('.NS', '');
+                if(quote.regularMarketPrice) {
+                  newPrices[cleanSymbol] = parseFloat(quote.regularMarketPrice);
+                }
+              });
             }
-          }
-          
-          if (Object.keys(newPrices).length > 0) {
-            setLivePrices(prev => ({...prev, ...newPrices}));
-            setApiStatusMsg(`✅ Live NSE Data Active (Refreshed: ${new Date().toLocaleTimeString()})`);
-          } else {
-            setApiStatusMsg("API Error: Could not fetch NSE data");
+            
+            if (Object.keys(newPrices).length > 0) {
+              setLivePrices(prev => ({...prev, ...newPrices}));
+              setApiStatusMsg(`✅ Live NSE Data Active (Refreshed: ${new Date().toLocaleTimeString()})`);
+            } else {
+              setApiStatusMsg("API Error: No pricing data returned");
+            }
+          } catch (e) { 
+            console.error("API error:", e); 
+            setApiStatusMsg("API Error: Proxy connection failed");
           }
         };
 
@@ -828,7 +832,7 @@
       
       const getButtonClass = (viewName) => `px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${currentView === viewName ? 'bg-appAccent/10 text-appAccent' : 'text-gray-400 hover:text-gray-200 hover:bg-gray-800/50'}`;
 
-      if (!db) return <div class="flex items-center justify-center h-screen bg-appNavy text-gray-400">Loading Cloud Database or Missing Config...</div>;
+      if (!db) return <div class="flex items-center justify-center h-screen bg-appNavy text-gray-400">Loading Cloud Database...</div>;
 
       return (
         <div class="min-h-screen flex flex-col">
