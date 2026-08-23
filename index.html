@@ -39,17 +39,17 @@
     const { useState, useEffect, useRef } = React;
 
     // =====================================================================
-    // 🔥 PASTE YOUR FIREBASE CONFIG HERE 🔥
+    // 🔥 LIVE FIREBASE CONFIGURATION (Added specifically for you) 🔥
     // =====================================================================
-const firebaseConfig = {
-  apiKey: "AIzaSyA4we5Feq5u0CtR4_JuHlb03cxLAZao4Jg",
-  authDomain: "market-maga.firebaseapp.com",
-  databaseURL: "https://market-maga-default-rtdb.asia-southeast1.firebasedatabase.app",
-  projectId: "market-maga",
-  storageBucket: "market-maga.firebasestorage.app",
-  messagingSenderId: "233938372949",
-  appId: "1:233938372949:web:4a97eb417a6461467d87dc"
-};
+    const firebaseConfig = {
+      apiKey: "AIzaSyA4we5Feq5u0CtR4_JuHlb03cxLAZao4Jg",
+      authDomain: "market-maga.firebaseapp.com",
+      databaseURL: "https://market-maga-default-rtdb.asia-southeast1.firebasedatabase.app",
+      projectId: "market-maga",
+      storageBucket: "market-maga.firebasestorage.app",
+      messagingSenderId: "233938372949",
+      appId: "1:233938372949:web:4a97eb417a6461467d87dc"
+    };
 
     let db;
     try {
@@ -60,11 +60,13 @@ const firebaseConfig = {
     }
     // =====================================================================
 
+    // Strict 2-decimal formatting for all money
     const formatMoney = (amount) => {
       if (amount === null || amount === undefined || isNaN(amount)) return '-';
-      return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(amount);
+      return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(amount);
     };
 
+    // Strict 3-decimal formatting for Stock Prices
     const formatPrice = (amount) => {
       if (amount === null || amount === undefined || isNaN(amount)) return '-';
       return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', minimumFractionDigits: 2, maximumFractionDigits: 3 }).format(amount);
@@ -215,11 +217,12 @@ const firebaseConfig = {
               </div>
             )}
           </div>
-          {importStatus === 'mapping' && ( <div class="bg-appNavy border border-appBorder rounded-xl p-6 mb-8 shadow-inner animate-fade-in"><h2 class="text-xl text-white mb-2">Map CSV Columns</h2><div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">{expectedFields.map(field => (<div key={field.key} class="bg-appCard p-4 rounded-lg border border-appBorder"><label class="block text-sm text-white mb-2">{field.label}</label><select value={columnMap[field.key] || ''} onChange={(e) => handleColumnMapChange(field.key, e.target.value)} class="w-full bg-appNavy border border-appBorder text-white rounded px-3 py-2 text-sm focus:border-appAccent outline-none"><option value="" class="italic text-gray-500">-- Not in this file --</option>{csvHeaders.map(header => <option key={header} value={header}>{header}</option>)}</select></div>))}</div>{unknownTraders.length > 0 && ( <div class="mb-8 p-5 bg-appCard border border-yellow-500/30 rounded-xl"><h3 class="text-yellow-500 font-semibold mb-2">⚠ Unknown Traders Found</h3><div class="grid grid-cols-1 md:grid-cols-2 gap-4">{unknownTraders.map(ut => (<div key={ut} class="flex items-center justify-between bg-appNavy p-3 rounded border border-appBorder"><span class="text-white text-sm font-medium">"{ut}"</span><select value={traderMap[ut]} onChange={(e) => setTraderMap({...traderMap, [ut]: e.target.value})} class="bg-appCard border border-appBorder text-white rounded px-2 py-1 text-sm outline-none"><option value="NEW">+ Add as New Trader</option><optgroup label="Map to existing:">{traders.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}</optgroup></select></div>))}</div></div> )}<div class="flex justify-between items-center border-t border-appBorder pt-4"><button onClick={() => setImportStatus('idle')} class="text-gray-400 hover:text-white transition">Cancel Import</button><button onClick={executeImport} class="bg-appGreen text-appNavy font-bold px-6 py-2 rounded-lg hover:bg-green-400 transition">Confirm & Import Data</button></div></div> )}
-          {importStatus === 'summary' && importSummary && ( <div class="bg-appNavy border border-appBorder rounded-xl p-6 mb-8 shadow-inner animate-fade-in"><h2 class="text-xl text-white mb-4">Import Complete!</h2><p class="text-appGreen text-lg mb-4">✅ Successfully imported <b>{importSummary.successCount}</b> ledger entries.</p><div class="mt-4"><button onClick={() => setImportStatus('idle')} class="bg-appCard text-white px-4 py-2 rounded">Close</button></div></div> )}
+          {importStatus === 'mapping' && ( <div class="bg-appNavy border border-appBorder rounded-xl p-6 mb-8 shadow-inner animate-fade-in"><h2 class="text-xl text-white mb-2">Map CSV Columns</h2><div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">{expectedFields.map(field => (<div key={field.key} class="bg-appCard p-4 rounded-lg border border-appBorder"><label class="block text-sm text-white mb-2">{field.label} {field.required && <span class="text-appRed">*</span>}</label><select value={columnMap[field.key] || ''} onChange={(e) => handleColumnMapChange(field.key, e.target.value)} class="w-full bg-appNavy border border-appBorder text-white rounded px-3 py-2 text-sm focus:border-appAccent outline-none"><option value="" class="italic text-gray-500">-- Not in this file --</option>{csvHeaders.map(header => <option key={header} value={header}>{header}</option>)}</select></div>))}</div>{unknownTraders.length > 0 && ( <div class="mb-8 p-5 bg-appCard border border-yellow-500/30 rounded-xl"><h3 class="text-yellow-500 font-semibold mb-2">⚠ Unknown Traders Found</h3><div class="grid grid-cols-1 md:grid-cols-2 gap-4">{unknownTraders.map(ut => (<div key={ut} class="flex items-center justify-between bg-appNavy p-3 rounded border border-appBorder"><span class="text-white text-sm font-medium">"{ut}"</span><select value={traderMap[ut]} onChange={(e) => setTraderMap({...traderMap, [ut]: e.target.value})} class="bg-appCard border border-appBorder text-white rounded px-2 py-1 text-sm outline-none"><option value="NEW">+ Add as New Trader</option><optgroup label="Map to existing:">{traders.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}</optgroup></select></div>))}</div></div> )}<div class="flex justify-between items-center border-t border-appBorder pt-4"><button onClick={() => setImportStatus('idle')} class="text-gray-400 hover:text-white transition">Cancel Import</button><button onClick={executeImport} class="bg-appGreen text-appNavy font-bold px-6 py-2 rounded-lg hover:bg-green-400 transition">Confirm & Import Data</button></div></div> )}
+          {importStatus === 'summary' && importSummary && ( <div class="bg-appNavy border border-appBorder rounded-xl p-6 mb-8 shadow-inner animate-fade-in"><h2 class="text-xl text-white mb-4">Import Complete!</h2><p class="text-appGreen text-lg mb-4">✅ Successfully imported <b>{importSummary.successCount}</b> ledger entries.</p><div class="mt-4"><button onClick={() => setImportStatus('idle')} class="bg-appCard border border-appBorder text-white px-4 py-2 rounded hover:bg-white/5 transition">Close Summary</button></div></div> )}
 
           {showForm && importStatus === 'idle' && (
             <div class="bg-appNavy border border-appBorder rounded-xl p-6 shadow-inner animate-fade-in">
+              <h2 class="text-white font-medium mb-4">{editingLedgerId ? 'Edit Passbook Entry' : 'Enter New Passbook Details'}</h2>
               <form onSubmit={handleSubmit}>
                 <div class="grid grid-cols-1 md:grid-cols-5 gap-4 items-start mb-4">
                   <div><label class="block text-xs text-gray-400 mb-1">Date</label><input required name="date" value={formData.date} onChange={handleChange} type="date" class="w-full bg-appCard border border-appBorder text-gray-300 rounded px-3 py-2 text-sm focus:border-appAccent outline-none" /></div>
@@ -463,6 +466,22 @@ const firebaseConfig = {
         const a = document.createElement('a'); a.setAttribute("href", dataStr); a.setAttribute("download", `MarketMaga_Backup_${new Date().toISOString().split('T')[0]}.json`);
         document.body.appendChild(a); a.click(); a.remove();
       };
+      
+      const backupInputRef = useRef(null);
+      const handleImportData = (e) => {
+        const file = e.target.files[0]; if (!file) return;
+        const reader = new FileReader();
+        reader.onload = (event) => {
+          try {
+            const data = JSON.parse(event.target.result);
+            if(data.traders && data.cashLedger && data.trades) {
+              setTraders(data.traders); setCashLedger(data.cashLedger); setTrades(data.trades);
+              alert("Backup successfully restored to Cloud!");
+            } else alert("Invalid backup file.");
+          } catch(err) { alert("Error reading file."); }
+        };
+        reader.readAsText(file); e.target.value = '';
+      };
 
       let traderStats = {};
       traders.forEach(t => traderStats[t.id] = { name: t.name, netInvested: 0, amountDeployed: 0, totalPnL: 0, cashHolding: 0 });
@@ -498,17 +517,6 @@ const firebaseConfig = {
       const totalCapitalInFund = Object.values(traderStats).reduce((sum, t) => sum + t.cashHolding + t.amountDeployed, 0);
       const cashAvailableToTrade = Object.values(traderStats).reduce((sum, t) => sum + t.cashHolding, 0);
       const amountDeployed = Object.values(traderStats).reduce((sum, t) => sum + t.amountDeployed, 0);
-      const sumOfCustody = Object.values(traderStats).reduce((sum, t) => sum + t.cashHolding, 0);
-      const isMathMatching = Math.round(sumOfCustody) === Math.round(cashAvailableToTrade);
-
-      let currentCustodianId = traders[0]?.id;
-      let highestCash = -999999;
-      traders.forEach(t => { if (traderStats[t.id].cashHolding > highestCash) { highestCash = traderStats[t.id].cashHolding; currentCustodianId = t.id; } });
-      const currentCustodianName = traders.find(t => t.id === currentCustodianId)?.name || 'None';
-      
-      let nextCustodianName = 'Anyone';
-      let lowestCash = 999999;
-      traders.forEach(t => { if (traderStats[t.id].cashHolding < lowestCash) { lowestCash = traderStats[t.id].cashHolding; nextCustodianName = t.name; } });
 
       const [newTraderName, setNewTraderName] = useState(''); const [editingTraderId, setEditingTraderId] = useState(null); const [editTraderName, setEditTraderName] = useState('');     
       const handleAddTrader = () => { if (newTraderName.trim() === '') return; setTraders([...traders, { id: Date.now(), name: newTraderName.trim() }]); setNewTraderName(''); };
@@ -548,6 +556,8 @@ const firebaseConfig = {
                   <div class="flex justify-between items-end mb-6">
                     <h1 class="text-2xl font-semibold text-white">Fund Overview</h1>
                     <div class="space-x-3">
+                      {isAdmin && <input type="file" accept=".json" ref={backupInputRef} onChange={handleImportData} class="hidden" />}
+                      {isAdmin && <button onClick={() => backupInputRef.current.click()} class="bg-appAccent/10 text-appAccent border border-appAccent/30 font-semibold px-4 py-2 rounded-lg hover:bg-appAccent/20 transition">↑ Restore Backup</button>}
                       <button onClick={handleExportData} class="bg-appAccent/10 text-appAccent border border-appAccent/30 font-semibold px-4 py-2 rounded-lg hover:bg-appAccent/20 transition">↓ Download Backup Data</button>
                     </div>
                   </div>
