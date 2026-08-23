@@ -41,7 +41,7 @@
     // =====================================================================
     // 🔥 LIVE API CONFIGURATIONS 🔥
     // =====================================================================
-    // 1. FIREBASE (Your Database)
+    // 1. FIREBASE (Your Live Database)
     const firebaseConfig = {
       apiKey: "AIzaSyA4we5Feq5u0CtR4_JuHlb03cxLAZao4Jg",
       authDomain: "market-maga.firebaseapp.com",
@@ -61,8 +61,7 @@
     }
 
     // 2. TWELVE DATA API (Free Live NSE Quotes & Historical Charts)
-    // Get a free key at https://twelvedata.com/
-    const TWELVE_DATA_API_KEY = "YOUR_TWELVEDATA_API_KEY_HERE"; 
+    const TWELVE_DATA_API_KEY = "1df34bcb2a4945e59a97184fdfe8ab51"; 
     // =====================================================================
 
     const formatMoney = (amount) => {
@@ -126,13 +125,12 @@
         const endD = new Date(sellD); endD.setDate(endD.getDate() + 30);
         const endStr = formatDateStr(endD);
 
-        // Core Drawing Engine (Works for both Real API and Simulation fallback)
+        // Core Drawing Engine
         const drawChart = (labels, prices, idealMinPrice, idealMaxPrice, isSimulation) => {
           const pointRadii = new Array(labels.length).fill(0);
           const pointBackgroundColors = new Array(labels.length).fill('transparent');
           const pointBorderColors = new Array(labels.length).fill('transparent');
 
-          // Find exact or nearest dates to plot the entry/exit dots
           const findClosestIndex = (targetStr) => {
             const tTime = parseLocalDate(targetStr).getTime();
             let minDiff = Infinity; let cIdx = -1;
@@ -148,11 +146,11 @@
 
           if(buyIdx !== -1) {
             pointRadii[buyIdx] = 8; pointBackgroundColors[buyIdx] = '#10B981'; pointBorderColors[buyIdx] = '#ffffff';
-            prices[buyIdx] = trade.buyPrice; // Overwrite chart price with actual executed price
+            if(isSimulation) prices[buyIdx] = trade.buyPrice; 
           }
           if(sellIdx !== -1) {
             pointRadii[sellIdx] = 8; pointBackgroundColors[sellIdx] = '#EF4444'; pointBorderColors[sellIdx] = '#ffffff';
-            prices[sellIdx] = trade.sellPrice;
+            if(isSimulation) prices[sellIdx] = trade.sellPrice;
           }
 
           const idealGain = idealMaxPrice - idealMinPrice;
@@ -201,7 +199,7 @@
                       if (ctx.index === buyIdx) return '#10B981';
                       if (ctx.index === sellIdx) return '#EF4444';
                       if (ctx.index === 0 || ctx.index === labels.length - 1) return '#38BDF8';
-                      return 'transparent'; // Hide dates that aren't the 4 milestones
+                      return 'transparent'; 
                     },
                     font: (ctx) => {
                       if (ctx.index === buyIdx || ctx.index === sellIdx || ctx.index === 0 || ctx.index === labels.length - 1) return { weight: 'bold', size: 11 };
@@ -230,10 +228,10 @@
           
           const statusEl = document.getElementById('ha-api-status');
           if(isSimulation) {
-            statusEl.innerText = "API Key Missing: Simulating Data";
+            statusEl.innerText = "Simulating Data (API Error/Missing)";
             statusEl.className = "absolute top-2 right-4 text-[10px] text-yellow-500 bg-yellow-500/10 border border-yellow-500/20 px-2 py-1 rounded";
           } else {
-            statusEl.innerText = "Live Market Historical Data";
+            statusEl.innerText = "Live NSE Historical Data";
             statusEl.className = "absolute top-2 right-4 text-[10px] text-appGreen bg-appGreen/10 border border-appGreen/20 px-2 py-1 rounded";
           }
         };
@@ -255,19 +253,23 @@
           drawChart(labels, prices, idealMinPrice, idealMaxPrice, true);
         };
 
-        // Real API Fetch Logic
-        if (TWELVE_DATA_API_KEY && TWELVE_DATA_API_KEY !== "1df34bcb2a4945e59a97184fdfe8ab51") {
-          fetch(`https://api.twelvedata.com/time_series?symbol=${trade.symbol}&country=India&interval=1day&outputsize=150&apikey=${TWELVE_DATA_API_KEY}`)
+        // Fetch historical data from TwelveData API
+        if (TWELVE_DATA_API_KEY && TWELVE_DATA_API_KEY !== "YOUR_TWELVEDATA_API_KEY_HERE") {
+          fetch(`https://api.twelvedata.com/time_series?symbol=${trade.symbol}&exchange=NSE&interval=1day&outputsize=150&apikey=${TWELVE_DATA_API_KEY}`)
             .then(res => res.json())
             .then(data => {
+              if (data.status === "error") {
+                console.error("TwelveData API Error:", data.message);
+                return buildSimulation();
+              }
               if (data.values) {
-                const reversed = data.values.reverse(); // TwelveData returns newest first
+                const reversed = data.values.reverse(); 
                 const windowData = reversed.filter(item => {
                   const d = parseLocalDate(item.datetime);
                   return d >= startD && d <= endD;
                 });
                 
-                if(windowData.length < 5) return buildSimulation(); // Fallback if data is sparse
+                if(windowData.length < 5) return buildSimulation(); 
 
                 const labels = []; const prices = [];
                 let idealMinPrice = 9999999; let idealMaxPrice = -9999999;
@@ -395,7 +397,7 @@
               </thead>
               <tbody class="divide-y divide-appBorder">
                 {openTrades.map(t => {
-                  const liveP = livePrices[t.symbol] || t.buyPrice; // Uses live state from App
+                  const liveP = livePrices[t.symbol] || t.buyPrice; 
                   const livePnL = (liveP - t.buyPrice) * t.qty;
                   
                   return (
@@ -618,7 +620,6 @@
       );
     }
 
-    // --- STATIC TRADE LOG VIEW ---
     function TradeLogView({ trades, setTrades, traders, setTraders, cashLedger, setCashLedger, isAdmin }) {
       const [showForm, setShowForm] = useState(false); const [editingTradeId, setEditingTradeId] = useState(null); const [filterTrader, setFilterTrader] = useState('All'); const [filterStatus, setFilterStatus] = useState('All'); const [selectedTradeIds, setSelectedTradeIds] = useState([]); 
       const [activeDropdown, setActiveDropdown] = useState(null);
@@ -769,7 +770,6 @@
                         <td class="p-2 text-gray-300"><div><span class="text-gray-500 text-[10px]">B:</span> {t.buyDate}</div><div><span class="text-gray-500 text-[10px]">S:</span> {t.status === 'Closed' ? t.sellDate : '-'}</div><div class="text-[10px] text-gray-500">{t.status === 'Closed' ? `${getDaysHeld(t)} days` : ''}</div></td>
                         <td class="p-2 text-gray-300">{t.qty}</td>
                         <td class="p-2 text-gray-300"><div><span class="text-gray-500 text-[10px]">B:</span> {formatPrice(t.buyPrice)}</div><div><span class="text-gray-500 text-[10px]">S:</span> {t.status === 'Closed' ? formatPrice(t.sellPrice) : '-'}</div></td>
-                        
                         <td class="p-2 border-l border-appBorder bg-white/5 text-gray-300">{formatMoney(invested)}</td>
                         
                         <td class={`p-2 border-l border-appBorder bg-white/5 font-bold ${t.status === 'Open' ? 'text-gray-500' : (t.actualPnL >= 0 ? 'text-appGreen' : 'text-appRed')}`}>{t.status === 'Closed' ? formatMoney(t.actualPnL) : '-'}</td>
@@ -859,7 +859,7 @@
         return () => { tRef.off(); cRef.off(); trRef.off(); };
       }, []);
 
-      // API Live Fetcher Engine
+      // LIVE OPEN TRADE FETCHER ENGINE (Upgraded with exchange=NSE)
       useEffect(() => {
         if (!TWELVE_DATA_API_KEY || TWELVE_DATA_API_KEY === "YOUR_TWELVEDATA_API_KEY_HERE") return;
         
@@ -869,15 +869,21 @@
           
           const symbols = [...new Set(openTrades.map(t => t.symbol))].join(',');
           try {
-            const res = await fetch(`https://api.twelvedata.com/price?symbol=${symbols}&country=India&apikey=${TWELVE_DATA_API_KEY}`);
+            // exchange=NSE guarantees Indian ticker accuracy
+            const res = await fetch(`https://api.twelvedata.com/price?symbol=${symbols}&exchange=NSE&apikey=${TWELVE_DATA_API_KEY}`);
             const data = await res.json();
             
+            if (data.status === "error") {
+                console.error("TwelveData API Error:", data.message);
+                return;
+            }
+
             let newPrices = {};
             if (data.price) {
               newPrices[openTrades[0].symbol] = parseFloat(data.price);
             } else {
               Object.keys(data).forEach(sym => {
-                if(data[sym].price) newPrices[sym] = parseFloat(data[sym].price);
+                if(data[sym] && data[sym].price) newPrices[sym] = parseFloat(data[sym].price);
               });
             }
             setLivePrices(prev => ({...prev, ...newPrices}));
@@ -885,7 +891,7 @@
         };
 
         fetchLivePrices();
-        const interval = setInterval(fetchLivePrices, 60000); // Pulse every 60 seconds
+        const interval = setInterval(fetchLivePrices, 60000); 
         return () => clearInterval(interval);
       }, [trades]);
 
@@ -967,7 +973,7 @@
       
       const getButtonClass = (viewName) => `px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${currentView === viewName ? 'bg-appAccent/10 text-appAccent' : 'text-gray-400 hover:text-gray-200 hover:bg-gray-800/50'}`;
 
-      if (!db) return <div class="flex items-center justify-center h-screen bg-appNavy text-gray-400">Loading Cloud Database or Missing Config... Check line 44!</div>;
+      if (!db) return <div class="flex items-center justify-center h-screen bg-appNavy text-gray-400">Loading Cloud Database or Missing Config... Check line 45!</div>;
 
       return (
         <div class="min-h-screen flex flex-col">
