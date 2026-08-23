@@ -310,7 +310,7 @@
       );
     }
 
-    // --- DASHBOARD: STATIC OPEN TRADES TRACKER ---
+    // --- DASHBOARD: STATIC OPEN TRADES TRACKER (API HALTED) ---
     function LiveOpenTradesTracker({ trades, traders }) {
       const openTrades = trades.filter(t => t.status === 'Open');
       if (openTrades.length === 0) return null;
@@ -325,7 +325,7 @@
               Live Open Trades Tracker
             </h3>
             <span class="text-xs text-gray-400 border border-gray-600 px-2 py-0.5 rounded">
-              Live Updates Paused
+              Live API Halted / Paused
             </span>
           </div>
           <div class="overflow-x-auto">
@@ -362,7 +362,7 @@
 
     function MonthlyStatementView({ cashLedger, trades, traders }) {
       const allDates = [...cashLedger.map(c => c.date), ...trades.map(t => t.buyDate), ...trades.map(t => t.status === 'Closed' ? t.sellDate : null)].filter(d => d); 
-      const uniqueMonths = [...new Set(allDates.map(d => d.substring(0, 7)))].sort().reverse(); 
+      const uniqueMonths = [...new Set(allDates.map(d => String(d).substring(0, 7)))].sort().reverse(); 
       const [selectedMonth, setSelectedMonth] = useState(uniqueMonths[0] || '');
 
       useEffect(() => { if (!uniqueMonths.includes(selectedMonth) && uniqueMonths.length > 0) setSelectedMonth(uniqueMonths[0]); }, [uniqueMonths, selectedMonth]);
@@ -471,8 +471,25 @@
       };
 
       const getTraderName = (id) => traders.find(tr => tr.id === id)?.name || 'Unknown';
-      const contributions = cashLedger.filter(c => c.purpose === 'New Investment'); const uniqueMonths = [...new Set(contributions.map(c => c.date.substring(0, 7)))].sort(); const gridData = {}; traders.forEach(t => { gridData[t.id] = { name: t.name, totalNet: 0, months: {} }; uniqueMonths.forEach(m => gridData[t.id].months[m] = 0); });
-      cashLedger.forEach(entry => { if (!entry.date) return; const monthKey = entry.date.substring(0, 7); if (entry.purpose === 'New Investment' && gridData[entry.fromMemberId]) { gridData[entry.fromMemberId].months[monthKey] += entry.amount; gridData[entry.fromMemberId].totalNet += entry.amount; } });
+      
+      // FIX 1: Safely filter and calculate unique months without crashing on missing dates
+      const contributions = cashLedger.filter(c => c.purpose === 'New Investment'); 
+      const uniqueMonths = [...new Set(contributions.filter(c => c && c.date).map(c => String(c.date).substring(0, 7)))].sort(); 
+      
+      const gridData = {}; 
+      traders.forEach(t => { 
+        gridData[t.id] = { name: t.name, totalNet: 0, months: {} }; 
+        uniqueMonths.forEach(m => gridData[t.id].months[m] = 0); 
+      });
+      
+      cashLedger.forEach(entry => { 
+        if (!entry.date) return; 
+        const monthKey = String(entry.date).substring(0, 7); 
+        if (entry.purpose === 'New Investment' && gridData[entry.fromMemberId]) { 
+          gridData[entry.fromMemberId].months[monthKey] += entry.amount; 
+          gridData[entry.fromMemberId].totalNet += entry.amount; 
+        } 
+      });
 
       return (
         <div class="animate-fade-in space-y-8">
@@ -513,40 +530,50 @@
           )}
           
           {importStatus === 'idle' && (
-            <div class="bg-appNavy border border-appBorder rounded-xl pb-2 overflow-x-auto">
-              <div class="flex space-x-4 p-4 border-b border-appBorder">
-                <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)} class="bg-appNavy border border-appBorder text-white rounded px-3 py-1 text-sm outline-none"><option value="All">All</option><option value="Open">Open</option><option value="Closed">Closed</option></select>
-                <select value={filterTrader} onChange={(e) => setFilterTrader(e.target.value)} class="bg-appNavy border border-appBorder text-white rounded px-3 py-1 text-sm outline-none"><option value="All">All</option>{traders.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}</select>
+            <div class="space-y-8 animate-fade-in">
+              <div class="bg-appNavy border border-appBorder rounded-xl overflow-hidden">
+                <div class="p-4 bg-appCard border-b border-appBorder"><h3 class="text-white font-medium">Monthly Contribution Grid</h3></div>
+                <div class="overflow-x-auto p-4"><table class="w-full text-left text-sm whitespace-nowrap"><thead><tr class="text-gray-400"><th class="pb-3 font-medium">Member</th>{uniqueMonths.map(m => <th key={m} class="pb-3 font-medium px-4 text-center">{m}</th>)}<th class="pb-3 font-medium text-right border-l border-appBorder pl-4">Total Invested</th></tr></thead><tbody class="divide-y divide-appBorder/50">{Object.values(gridData).map((row, idx) => (<tr key={idx} class="hover:bg-white/5 transition"><td class="py-3 text-white font-medium">{row.name}</td>{uniqueMonths.map(m => { const amount = row.months[m]; if (amount === 0) return <td key={m} class="py-2 px-4 text-center"><div class="border border-dashed border-appRed/50 bg-appRed/10 text-appRed rounded text-xs py-1">No Entry</div></td>; return <td key={m} class="py-3 px-4 text-center text-appGreen">{formatMoney(amount)}</td>; })}<td class="py-3 text-right text-gray-300 border-l border-appBorder pl-4 font-semibold">{formatMoney(row.totalNet)}</td></tr>))}</tbody></table></div>
               </div>
-              <table class="w-full text-left text-xs whitespace-nowrap">
-                <thead class="bg-appCard border-b border-appBorder text-gray-400 uppercase">
-                  <tr>
-                    {isAdmin && <th class="px-4 py-3 w-10"><input type="checkbox" class="accent-appAccent cursor-pointer" checked={cashLedger.length > 0 && selectedLedgerIds.length === cashLedger.length} onChange={handleSelectAll} /></th>}
-                    <th class="px-4 py-3">Date</th><th class="px-4 py-3 text-right">Amount</th><th class="px-4 py-3">From</th><th class="px-4 py-3">To</th><th class="px-4 py-3">Purpose</th><th class="px-4 py-3">Details</th>
-                    {isAdmin && <th class="px-4 py-3 text-center">Action</th>}
-                  </tr>
-                </thead>
-                <tbody class="divide-y divide-appBorder">
-                  {cashLedger.map((entry) => (
-                    <tr key={entry.id} class="hover:bg-white/5 transition">
-                      {isAdmin && <td class="px-4 py-3"><input type="checkbox" class="accent-appAccent cursor-pointer" checked={selectedLedgerIds.includes(entry.id)} onChange={(e) => { if (e.target.checked) setSelectedLedgerIds([...selectedLedgerIds, entry.id]); else setSelectedLedgerIds(selectedLedgerIds.filter(id => id !== entry.id)); }} /></td>}
-                      <td class="px-4 py-3 text-gray-300">{entry.date}</td><td class="px-4 py-3 text-right text-white font-medium">{formatMoney(entry.amount)}</td><td class="px-4 py-3"><span class="bg-appCard border border-appBorder px-2 py-1 rounded text-gray-300">{getTraderName(entry.fromMemberId)}</span></td><td class="px-4 py-3"><span class="bg-appCard border border-appBorder px-2 py-1 rounded text-gray-300">{getTraderName(entry.toMemberId)}</span></td><td class="px-4 py-3"><span class={`px-2 py-1 rounded text-xs ${entry.purpose === 'New Investment' ? 'bg-appGreen/10 text-appGreen' : entry.purpose === 'Withdrawal' ? 'bg-appRed/10 text-appRed' : 'bg-appAccent/10 text-appAccent'}`}>{entry.purpose}</span></td><td class="px-4 py-3 text-gray-400 text-xs">{entry.linkedTradeIds && entry.linkedTradeIds.length > 0 && (<span class="text-appAccent block mb-1 font-medium">Trades: {entry.linkedTradeIds.map(id => trades.find(t => t.id === id)?.symbol).join(', ')}</span>)}{entry.comments && <span class="block">{entry.comments}</span>}</td>
-                      {isAdmin && (
-                        <td class="px-4 py-3 relative text-center">
-                          <button onClick={() => setActiveDropdown(activeDropdown === entry.id ? null : entry.id)} class="text-gray-400 hover:text-white px-2 rounded hover:bg-white/10 font-bold">⋮</button>
-                          {activeDropdown === entry.id && (
-                            <div class="absolute right-6 top-8 w-24 bg-appCard border border-appBorder shadow-xl rounded z-50 overflow-hidden text-left">
-                              <button onClick={() => handleEdit(entry)} class="block w-full px-4 py-2 hover:bg-white/5 text-appAccent text-xs">Edit</button>
-                              <button onClick={() => handleDelete(entry)} class="block w-full px-4 py-2 hover:bg-white/5 text-appRed text-xs">Delete</button>
-                            </div>
+              <div class="bg-appNavy border border-appBorder rounded-xl overflow-hidden">
+                <div class="p-4 bg-appCard border-b border-appBorder"><h3 class="text-white font-medium">Market Magas PassBook</h3></div>
+                <div class="overflow-x-auto max-h-96">
+                  <table class="w-full text-left text-sm whitespace-nowrap">
+                    <thead class="bg-appNavy sticky top-0 border-b border-appBorder text-gray-400 text-xs uppercase">
+                      <tr>
+                        {isAdmin && <th class="px-4 py-3 w-10"><input type="checkbox" class="accent-appAccent cursor-pointer" checked={cashLedger.length > 0 && selectedLedgerIds.length === cashLedger.length} onChange={handleSelectAll} /></th>}
+                        <th class="px-4 py-3">Date</th><th class="px-4 py-3 text-right">Amount</th><th class="px-4 py-3">From</th><th class="px-4 py-3">To</th><th class="px-4 py-3">Purpose</th><th class="px-4 py-3">Details</th>
+                        {isAdmin && <th class="px-4 py-3 text-center">Action</th>}
+                      </tr>
+                    </thead>
+                    <tbody class="divide-y divide-appBorder">
+                      {cashLedger.map((entry) => (
+                        <tr key={entry.id} class="hover:bg-white/5 transition">
+                          {isAdmin && <td class="px-4 py-3"><input type="checkbox" class="accent-appAccent cursor-pointer" checked={selectedLedgerIds.includes(entry.id)} onChange={(e) => { if (e.target.checked) setSelectedLedgerIds([...selectedLedgerIds, entry.id]); else setSelectedLedgerIds(selectedLedgerIds.filter(id => id !== entry.id)); }} /></td>}
+                          <td class="px-4 py-3 text-gray-300">{entry.date}</td><td class="px-4 py-3 text-right text-white font-medium">{formatMoney(entry.amount)}</td><td class="px-4 py-3"><span class="bg-appCard border border-appBorder px-2 py-1 rounded text-gray-300">{getTraderName(entry.fromMemberId)}</span></td><td class="px-4 py-3"><span class="bg-appCard border border-appBorder px-2 py-1 rounded text-gray-300">{getTraderName(entry.toMemberId)}</span></td><td class="px-4 py-3"><span class={`px-2 py-1 rounded text-xs ${entry.purpose === 'New Investment' ? 'bg-appGreen/10 text-appGreen' : entry.purpose === 'Withdrawal' ? 'bg-appRed/10 text-appRed' : 'bg-appAccent/10 text-appAccent'}`}>{entry.purpose}</span></td>
+                          <td class="px-4 py-3 text-gray-400 text-xs">
+                            {/* FIX 2: Safely map linked trades without crashing on corrupted data */}
+                            {Array.isArray(entry.linkedTradeIds) && entry.linkedTradeIds.length > 0 && (<span class="text-appAccent block mb-1 font-medium">Trades: {entry.linkedTradeIds.map(id => trades.find(t => t.id === id)?.symbol).filter(Boolean).join(', ')}</span>)}
+                            {entry.comments && <span class="block">{entry.comments}</span>}
+                          </td>
+                          {isAdmin && (
+                            <td class="px-4 py-3 relative text-center">
+                              <button onClick={() => setActiveDropdown(activeDropdown === entry.id ? null : entry.id)} class="text-gray-400 hover:text-white px-2 rounded hover:bg-white/10 font-bold">⋮</button>
+                              {activeDropdown === entry.id && (
+                                <div class="absolute right-6 top-8 w-24 bg-appCard border border-appBorder shadow-xl rounded z-50 overflow-hidden text-left">
+                                  <button onClick={() => handleEdit(entry)} class="block w-full px-4 py-2 hover:bg-white/5 text-appAccent text-xs">Edit</button>
+                                  <button onClick={() => handleDelete(entry)} class="block w-full px-4 py-2 hover:bg-white/5 text-appRed text-xs">Delete</button>
+                                </div>
+                              )}
+                            </td>
                           )}
-                        </td>
-                      )}
-                    </tr>
-                  ))}
-                  {cashLedger.length === 0 && <tr><td colSpan={isAdmin ? 8 : 6} class="px-4 py-8 text-center text-gray-500">No ledger entries yet.</td></tr>}
-                </tbody>
-              </table>
+                        </tr>
+                      ))}
+                      {cashLedger.length === 0 && <tr><td colSpan={isAdmin ? 8 : 6} class="px-4 py-8 text-center text-gray-500">No ledger entries yet.</td></tr>}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
             </div>
           )}
           {activeDropdown && <div class="fixed inset-0 z-40" onClick={() => setActiveDropdown(null)}></div>}
@@ -940,6 +967,7 @@
                     </div>
                   </div>
 
+                  {/* STATIC OPEN TRADES TRACKER (API HALTED FOR STABILITY) */}
                   <LiveOpenTradesTracker trades={trades} traders={traders} />
 
                   <DashboardCharts trades={trades} traders={traders} />
