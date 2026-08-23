@@ -41,7 +41,6 @@
     // =====================================================================
     // 🔥 LIVE API CONFIGURATIONS 🔥
     // =====================================================================
-    // 1. FIREBASE (Your Live Database)
     const firebaseConfig = {
       apiKey: "AIzaSyA4we5Feq5u0CtR4_JuHlb03cxLAZao4Jg",
       authDomain: "market-maga.firebaseapp.com",
@@ -59,9 +58,6 @@
     } catch (e) {
       console.error("Firebase failed to load. Check your config!", e);
     }
-
-    // 2. TWELVE DATA API (Free Live NSE Quotes & Historical Charts)
-    const TWELVE_DATA_API_KEY = "1df34bcb2a4945e59a97184fdfe8ab51"; 
     // =====================================================================
 
     const formatMoney = (amount) => {
@@ -94,7 +90,7 @@
       return dStr; 
     };
 
-    // --- ENHANCED HINDSIGHT ANALYZER (WITH LIVE API) ---
+    // --- ENHANCED HINDSIGHT ANALYZER (WITH YAHOO FINANCE LIVE API) ---
     function HindsightAnalyzer({ trade, onClose }) {
       const chartRef = useRef(null);
       const chartInstance = useRef(null);
@@ -248,41 +244,49 @@
           drawChart(labels, prices, idealMinPrice, idealMaxPrice, errorMsg || "Simulating Data", true);
         };
 
-        // Fetch historical data from TwelveData API
-        if (TWELVE_DATA_API_KEY && TWELVE_DATA_API_KEY.length > 10) {
-          fetch(`https://api.twelvedata.com/time_series?symbol=${trade.symbol}&exchange=NSE&interval=1day&outputsize=150&apikey=${TWELVE_DATA_API_KEY}`)
-            .then(res => res.json())
-            .then(data => {
-              if (data.status === "error") {
-                console.error("TwelveData API Error:", data.message);
-                return buildSimulation(`API Error: ${data.message}`);
-              }
-              if (data.values) {
-                const reversed = data.values.reverse(); 
-                const windowData = reversed.filter(item => {
-                  const d = parseLocalDate(item.datetime);
-                  return d >= startD && d <= endD;
-                });
-                
-                if(windowData.length < 5) return buildSimulation("Not enough historical data"); 
+        // NEW: Fetch historical data securely from Yahoo Finance via Proxy
+        const fetchHistorical = async () => {
+          const startUnix = Math.floor(startD.getTime() / 1000);
+          const endUnix = Math.floor(endD.getTime() / 1000);
+          
+          const yfUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${trade.symbol}.NS?period1=${startUnix}&period2=${endUnix}&interval=1d`;
+          const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(yfUrl)}`;
+          
+          try {
+            const res = await fetch(proxyUrl);
+            const data = await res.json();
+            const parsed = JSON.parse(data.contents);
+            
+            if (parsed.chart && parsed.chart.result && parsed.chart.result.length > 0) {
+              const result = parsed.chart.result[0];
+              const timestamps = result.timestamp;
+              const closes = result.indicators.quote[0].close;
+              
+              if (!timestamps || !closes || timestamps.length < 5) return buildSimulation("Not enough historical data");
+              
+              const labels = []; const prices = [];
+              let idealMinPrice = 9999999; let idealMaxPrice = -9999999;
 
-                const labels = []; const prices = [];
-                let idealMinPrice = 9999999; let idealMaxPrice = -9999999;
+              timestamps.forEach((ts, idx) => {
+                const price = parseFloat(closes[idx]);
+                if (!isNaN(price)) {
+                    const d = new Date(ts * 1000);
+                    labels.push(formatDateStr(d));
+                    prices.push(price);
+                    if (price < idealMinPrice) idealMinPrice = price;
+                    if (price > idealMaxPrice) idealMaxPrice = price;
+                }
+              });
+              drawChart(labels, prices, idealMinPrice, idealMaxPrice, "✅ Live Yahoo Historical Data", false);
+            } else {
+              buildSimulation("Invalid Data Format");
+            }
+          } catch (e) {
+            buildSimulation("Network Error Fetching Data");
+          }
+        };
 
-                windowData.forEach(item => {
-                  labels.push(item.datetime);
-                  const price = parseFloat(item.close);
-                  prices.push(price);
-                  if (price < idealMinPrice) idealMinPrice = price;
-                  if (price > idealMaxPrice) idealMaxPrice = price;
-                });
-                drawChart(labels, prices, idealMinPrice, idealMaxPrice, "✅ Live NSE Historical Data", false);
-              } else buildSimulation("Invalid Data Format");
-            })
-            .catch(() => buildSimulation("Network Error Fetching Data"));
-        } else {
-          buildSimulation("API Key Missing or Invalid");
-        }
+        fetchHistorical();
 
         return () => { if (chartInstance.current) chartInstance.current.destroy(); };
       }, [trade]);
@@ -371,7 +375,6 @@
               <span class="w-2 h-2 rounded-full bg-appGreen mr-2 animate-pulse"></span>
               Live Open Trades Tracker
             </h3>
-            {/* NEW: Dynamic API Badge shows exact status/error */}
             <span class={`text-xs border px-2 py-0.5 rounded ${apiStatusMsg.includes('✅') ? 'text-appGreen border-appGreen/30 bg-appGreen/10' : 'text-yellow-500 border-yellow-500/30 bg-yellow-500/10'}`}>
               {apiStatusMsg}
             </span>
@@ -704,45 +707,41 @@
         return () => { tRef.off(); cRef.off(); trRef.off(); };
       }, []);
 
-      // 🔥 UPGRADED: LIVE OPEN TRADE FETCHER ENGINE WITH DIAGNOSTICS 🔥
+      // 🔥 UPGRADED: LIVE OPEN TRADE FETCHER ENGINE (YAHOO FINANCE) 🔥
       useEffect(() => {
-        if (!TWELVE_DATA_API_KEY || TWELVE_DATA_API_KEY.length < 10) {
-           setApiStatusMsg("API Key Missing or Invalid");
-           return;
-        }
-        
         const fetchLivePrices = async () => {
           const openTrades = trades.filter(t => t.status === 'Open');
           if(openTrades.length === 0) return;
           
-          const symbols = [...new Set(openTrades.map(t => t.symbol))].join(',');
-          try {
-            setApiStatusMsg("Fetching Live NSE Prices...");
-            // Added exchange=NSE to force exact Indian Market prices
-            const res = await fetch(`https://api.twelvedata.com/price?symbol=${symbols}&exchange=NSE&apikey=${TWELVE_DATA_API_KEY}`);
-            const data = await res.json();
-            
-            if (data.status === "error") {
-                console.error("TwelveData API Error:", data.message);
-                setApiStatusMsg(`API Error: ${data.message}`);
-                return;
-            }
+          setApiStatusMsg("Fetching Live NSE Prices...");
+          let newPrices = {};
+          let hasError = false;
 
-            let newPrices = {};
-            if (data.price) {
-              newPrices[openTrades[0].symbol] = parseFloat(data.price);
-            } else {
-              Object.keys(data).forEach(sym => {
-                if(data[sym] && data[sym].price) newPrices[sym] = parseFloat(data[sym].price);
-              });
+          for (let t of openTrades) {
+            try {
+              // Add .NS for National Stock Exchange on Yahoo Finance, routed through free proxy
+              const yfUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${t.symbol}.NS?interval=1m`;
+              const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(yfUrl)}`;
+              
+              const res = await fetch(proxyUrl);
+              const data = await res.json();
+              const parsed = JSON.parse(data.contents);
+              
+              if (parsed.chart && parsed.chart.result && parsed.chart.result.length > 0) {
+                newPrices[t.symbol] = parsed.chart.result[0].meta.regularMarketPrice;
+              } else {
+                hasError = true;
+              }
+            } catch (e) { 
+              hasError = true;
             }
+          }
+          
+          if (Object.keys(newPrices).length > 0) {
             setLivePrices(prev => ({...prev, ...newPrices}));
-            
-            // Success! Show exactly when it refreshed
             setApiStatusMsg(`✅ Live NSE Data Active (Refreshed: ${new Date().toLocaleTimeString()})`);
-          } catch (e) { 
-            console.error("API error:", e); 
-            setApiStatusMsg("Network Error: Cannot reach API");
+          } else {
+            setApiStatusMsg("API Error: Could not fetch NSE data");
           }
         };
 
@@ -829,7 +828,7 @@
       
       const getButtonClass = (viewName) => `px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${currentView === viewName ? 'bg-appAccent/10 text-appAccent' : 'text-gray-400 hover:text-gray-200 hover:bg-gray-800/50'}`;
 
-      if (!db) return <div class="flex items-center justify-center h-screen bg-appNavy text-gray-400">Loading Cloud Database or Missing Config... Check line 44!</div>;
+      if (!db) return <div class="flex items-center justify-center h-screen bg-appNavy text-gray-400">Loading Cloud Database or Missing Config...</div>;
 
       return (
         <div class="min-h-screen flex flex-col">
@@ -899,7 +898,7 @@
                     </div>
                   </div>
 
-                  {/* LIVE OPEN TRADES TRACKER ON DASHBOARD (Passes the apiStatusMsg) */}
+                  {/* LIVE OPEN TRADES TRACKER ON DASHBOARD */}
                   <LiveOpenTradesTracker trades={trades} traders={traders} livePrices={livePrices} apiStatusMsg={apiStatusMsg} />
 
                   <DashboardCharts trades={trades} traders={traders} />
