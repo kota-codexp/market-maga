@@ -13,7 +13,6 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
 
-  <!-- Firebase Cloud Database Tools -->
   <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-database-compat.js"></script>
 
@@ -92,64 +91,164 @@ const firebaseConfig = {
 
     // --- NEW: THE HINDSIGHT ANALYZER MODAL ---
     function HindsightAnalyzer({ trade, onClose }) {
+      const chartRef = useRef(null);
+      const chartInstance = useRef(null);
+
+      useEffect(() => {
+        if (!trade || !chartRef.current) return;
+
+        // --- STEP 1 UI: Simulated Historical Data Generation ---
+        // (In Step 2, this will be replaced by a real API fetch based on dates)
+        const buyDate = new Date(trade.buyDate);
+        const sellDate = new Date(trade.sellDate);
+        
+        // Window: 30 days before buy, 30 days after sell
+        let startDate = new Date(buyDate); startDate.setDate(startDate.getDate() - 30);
+        let endDate = new Date(sellDate); endDate.setDate(endDate.getDate() + 30);
+        
+        const totalDays = Math.floor((endDate - startDate) / (1000 * 60 * 60 * 24));
+        const labels = [];
+        const prices = [];
+        let currentPrice = trade.buyPrice * 0.95; // Starting point
+
+        let idealMinPrice = currentPrice;
+        let idealMaxPrice = currentPrice;
+
+        for (let i = 0; i <= totalDays; i++) {
+          let d = new Date(startDate);
+          d.setDate(d.getDate() + i);
+          labels.push(d.toISOString().split('T')[0]);
+          
+          // Force the curve to hit the actual buy and sell prices on their exact dates
+          if (d.getTime() === buyDate.getTime()) currentPrice = trade.buyPrice;
+          else if (d.getTime() === sellDate.getTime()) currentPrice = trade.sellPrice;
+          else {
+            // Random walk simulation
+            currentPrice = currentPrice + ((Math.random() - 0.48) * (trade.buyPrice * 0.03));
+          }
+          
+          prices.push(currentPrice);
+          if (currentPrice < idealMinPrice) idealMinPrice = currentPrice;
+          if (currentPrice > idealMaxPrice) idealMaxPrice = currentPrice;
+        }
+
+        // Math: Captured vs Ideal
+        const idealGain = idealMaxPrice - idealMinPrice;
+        const idealPercentage = ((idealGain / idealMinPrice) * 100).toFixed(2);
+        
+        const actualGain = trade.sellPrice - trade.buyPrice;
+        const actualPercentage = ((actualGain / trade.buyPrice) * 100).toFixed(2);
+        
+        const captureEfficiency = idealGain > 0 ? ((actualGain / idealGain) * 100).toFixed(1) : 0;
+
+        // Draw Chart
+        if (chartInstance.current) chartInstance.current.destroy();
+        
+        Chart.defaults.color = '#9CA3AF';
+        chartInstance.current = new Chart(chartRef.current, {
+          type: 'line',
+          data: {
+            labels: labels,
+            datasets: [{
+              label: 'Stock Price',
+              data: prices,
+              borderColor: '#38BDF8',
+              backgroundColor: 'rgba(56, 189, 248, 0.1)',
+              borderWidth: 2,
+              pointRadius: 0,
+              fill: true,
+              tension: 0.4
+            }]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: { intersect: false, mode: 'index' },
+            plugins: {
+              legend: { display: false },
+              tooltip: {
+                callbacks: { label: (context) => `₹${context.parsed.y.toFixed(2)}` }
+              },
+              annotation: {
+                // In a real plugin setup, we'd draw vertical lines for Buy/Sell dates here.
+              }
+            },
+            scales: {
+              x: { display: false }, // Hide dense dates
+              y: { grid: { color: '#2A364F' } }
+            }
+          }
+        });
+
+        // Write the calculated stats to the DOM elements
+        document.getElementById('ha-ideal-buy').innerText = formatPrice(idealMinPrice);
+        document.getElementById('ha-ideal-sell').innerText = formatPrice(idealMaxPrice);
+        document.getElementById('ha-ideal-gain').innerText = `${idealPercentage}%`;
+        document.getElementById('ha-actual-gain').innerText = `${actualPercentage}%`;
+        document.getElementById('ha-efficiency').innerText = `${captureEfficiency}%`;
+        document.getElementById('ha-efficiency-bar').style.width = `${Math.max(0, Math.min(100, captureEfficiency))}%`;
+
+        return () => { if (chartInstance.current) chartInstance.current.destroy(); };
+      }, [trade]);
+
       if (!trade) return null;
-      
-      // Simulate historical data based on the trade's actual metrics to mimic momentum indicators
-      const buyP = trade.buyPrice;
-      const sellP = trade.sellPrice;
-      const isLong = sellP > buyP;
-      
-      const volatility = buyP * 0.15; // Simulate 15% volatility window
-      const simulatedHigh = isLong ? sellP + (volatility * Math.random()) : buyP + (volatility * 0.5);
-      const simulatedLow = isLong ? buyP - (volatility * 0.3) : sellP - (volatility * Math.random());
-      
-      const maxPossibleGain = simulatedHigh - simulatedLow;
-      const actualGain = sellP - buyP;
-      const efficiency = maxPossibleGain > 0 ? ((actualGain / maxPossibleGain) * 100).toFixed(1) : 0;
 
       return (
         <div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-appNavy/90 backdrop-blur-sm animate-fade-in">
-          <div class="bg-appCard border border-appBorder rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden">
-            <div class="flex justify-between items-center p-6 border-b border-appBorder bg-appNavy">
+          <div class="bg-appCard border border-appBorder rounded-2xl shadow-2xl w-full max-w-4xl overflow-hidden flex flex-col max-h-[90vh]">
+            <div class="flex justify-between items-center p-6 border-b border-appBorder bg-appNavy shrink-0">
               <h2 class="text-xl font-bold text-white flex items-center">
-                <span class="text-appAccent mr-2">📈</span> {trade.symbol} <span class="text-gray-400 font-normal ml-2 text-sm">Hindsight Analyzer</span>
+                <span class="text-appAccent mr-2">📈</span> {trade.symbol} <span class="text-gray-400 font-normal ml-2 text-sm">Hindsight Analyzer (±30 Days)</span>
               </h2>
               <button onClick={onClose} class="text-gray-400 hover:text-white text-2xl leading-none">&times;</button>
             </div>
             
-            <div class="p-6 space-y-6">
+            <div class="p-6 overflow-y-auto space-y-6">
+              {/* Stats Row */}
               <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
                 <div class="bg-appNavy border border-appBorder rounded-lg p-4">
-                  <p class="text-xs text-gray-400 mb-1">Buy Price</p>
-                  <p class="font-bold text-white">{formatPrice(buyP)}</p>
+                  <p class="text-xs text-gray-400 mb-1">Your Buy Price</p>
+                  <p class="font-bold text-white">{formatPrice(trade.buyPrice)}</p>
                 </div>
                 <div class="bg-appNavy border border-appBorder rounded-lg p-4">
-                  <p class="text-xs text-gray-400 mb-1">Sell Price</p>
-                  <p class="font-bold text-white">{formatPrice(sellP)}</p>
+                  <p class="text-xs text-gray-400 mb-1">Your Sell Price</p>
+                  <p class="font-bold text-white">{formatPrice(trade.sellPrice)}</p>
                 </div>
-                <div class="bg-appNavy border border-appBorder rounded-lg p-4">
-                  <p class="text-xs text-gray-400 mb-1">30-Day High</p>
-                  <p class="font-bold text-appGreen">{formatPrice(simulatedHigh)}</p>
+                <div class="bg-appNavy border border-appGreen/30 rounded-lg p-4">
+                  <p class="text-xs text-appGreen mb-1">Ideal Entry (Window Low)</p>
+                  <p id="ha-ideal-buy" class="font-bold text-white">-</p>
                 </div>
-                <div class="bg-appNavy border border-appBorder rounded-lg p-4">
-                  <p class="text-xs text-gray-400 mb-1">30-Day Low</p>
-                  <p class="font-bold text-appRed">{formatPrice(simulatedLow)}</p>
+                <div class="bg-appNavy border border-appGreen/30 rounded-lg p-4">
+                  <p class="text-xs text-appGreen mb-1">Ideal Exit (Window High)</p>
+                  <p id="ha-ideal-sell" class="font-bold text-white">-</p>
                 </div>
               </div>
 
+              {/* Chart Area */}
+              <div class="bg-appNavy border border-appBorder rounded-xl p-4 h-64 relative">
+                <canvas ref={chartRef}></canvas>
+                <div class="absolute top-2 right-4 text-[10px] text-gray-500 bg-appNavy/80 px-2 rounded">API Simulation Mode</div>
+              </div>
+
+              {/* Efficiency Breakdown */}
               <div class="bg-appNavy border border-appBorder rounded-xl p-6 relative overflow-hidden">
                 <div class="absolute right-0 top-0 opacity-5 text-9xl leading-none -mt-4 -mr-4">🎯</div>
-                <h3 class="text-lg font-semibold text-white mb-2">Trade Efficiency: {efficiency}%</h3>
-                <div class="w-full bg-appCard rounded-full h-3 mb-4 border border-appBorder overflow-hidden">
-                  <div class="bg-appAccent h-3 rounded-full" style={{ width: `${Math.max(0, Math.min(100, efficiency))}%` }}></div>
+                <div class="flex justify-between items-end mb-2">
+                  <h3 class="text-lg font-semibold text-white">Capture Efficiency: <span id="ha-efficiency">-%</span></h3>
+                  <div class="text-right">
+                    <p class="text-xs text-gray-400">Actual Return: <span id="ha-actual-gain" class="font-bold text-white">-%</span></p>
+                    <p class="text-xs text-gray-400">Max Possible: <span id="ha-ideal-gain" class="font-bold text-appGreen">-%</span></p>
+                  </div>
                 </div>
-                <p class="text-sm text-gray-300">
-                  You captured <span class="font-bold text-white">{formatPrice(actualGain)}</span> per share. 
-                  Based on post-trade momentum, the maximum ideal move was <span class="font-bold text-white">{formatPrice(maxPossibleGain)}</span>. 
-                </p>
+                
+                <div class="w-full bg-appCard rounded-full h-3 mb-2 border border-appBorder overflow-hidden">
+                  <div id="ha-efficiency-bar" class="bg-appAccent h-3 rounded-full transition-all duration-1000" style={{ width: '0%' }}></div>
+                </div>
+                <p class="text-xs text-gray-400">This analyzes how much of the optimal move you captured within 30 days before buying and 30 days after selling.</p>
               </div>
             </div>
-            <div class="p-4 border-t border-appBorder bg-appNavy text-center">
+            
+            <div class="p-4 border-t border-appBorder bg-appNavy text-center shrink-0">
               <button onClick={onClose} class="px-6 py-2 bg-appCard border border-appBorder text-white rounded hover:bg-white/5 transition">Close Analyzer</button>
             </div>
           </div>
@@ -157,7 +256,53 @@ const firebaseConfig = {
       );
     }
 
-    // --- MONTHLY STATEMENTS COMPONENT ---
+    // --- DASHBOARD LIVE TRACKER COMPONENT ---
+    function LiveOpenTradesTracker({ trades, traders }) {
+      const openTrades = trades.filter(t => t.status === 'Open');
+      
+      if (openTrades.length === 0) return null;
+
+      const getTraderName = (id) => traders.find(tr => tr.id === id)?.name || 'Unknown';
+
+      return (
+        <div class="bg-appNavy border border-appBorder rounded-xl overflow-hidden mb-8 shadow-lg">
+          <div class="p-4 bg-appCard border-b border-appBorder flex justify-between items-center">
+            <h3 class="text-white font-medium flex items-center">
+              <span class="w-2 h-2 rounded-full bg-appGreen mr-2 animate-pulse"></span>
+              Live Open Trades
+            </h3>
+            <span class="text-xs text-gray-400 border border-gray-600 px-2 py-0.5 rounded">API Connecting...</span>
+          </div>
+          <div class="overflow-x-auto">
+            <table class="w-full text-left text-sm whitespace-nowrap">
+              <thead class="bg-appNavy border-b border-appBorder text-gray-400 text-xs uppercase">
+                <tr><th class="px-5 py-3">Asset</th><th class="px-5 py-3">Trader</th><th class="px-5 py-3">Qty</th><th class="px-5 py-3">Buy Price</th><th class="px-5 py-3 text-appAccent">Live Price</th><th class="px-5 py-3 text-appAccent border-l border-appBorder bg-white/5">Live P&L</th></tr>
+              </thead>
+              <tbody class="divide-y divide-appBorder">
+                {openTrades.map(t => {
+                  // In Step 2, this liveP will come from the API. 
+                  // For now, it holds the buy price.
+                  const liveP = t.buyPrice; 
+                  const livePnL = (liveP - t.buyPrice) * t.qty;
+                  
+                  return (
+                    <tr key={t.id} class="hover:bg-white/5 transition">
+                      <td class="px-5 py-3 font-bold text-white">{t.symbol}</td>
+                      <td class="px-5 py-3 text-gray-300">{getTraderName(t.traderId)}</td>
+                      <td class="px-5 py-3 text-gray-300">{t.qty}</td>
+                      <td class="px-5 py-3 text-gray-300">{formatPrice(t.buyPrice)}</td>
+                      <td class="px-5 py-3 font-bold text-appAccent">{formatPrice(liveP)}</td>
+                      <td class={`px-5 py-3 font-bold border-l border-appBorder bg-white/5 ${livePnL >= 0 ? 'text-appGreen' : 'text-appRed'}`}>{formatMoney(livePnL)}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      );
+    }
+
     function MonthlyStatementView({ cashLedger, trades, traders }) {
       const allDates = [...cashLedger.map(c => c.date), ...trades.map(t => t.buyDate), ...trades.map(t => t.status === 'Closed' ? t.sellDate : null)].filter(d => d); 
       const uniqueMonths = [...new Set(allDates.map(d => d.substring(0, 7)))].sort().reverse(); 
@@ -324,7 +469,7 @@ const firebaseConfig = {
                       <tr>
                         {isAdmin && <th class="px-4 py-3 w-10"><input type="checkbox" class="accent-appAccent cursor-pointer" checked={cashLedger.length > 0 && selectedLedgerIds.length === cashLedger.length} onChange={handleSelectAll} /></th>}
                         <th class="px-4 py-3">Date</th><th class="px-4 py-3 text-right">Amount</th><th class="px-4 py-3">From</th><th class="px-4 py-3">To</th><th class="px-4 py-3">Purpose</th><th class="px-4 py-3">Details</th>
-                        {isAdmin && <th class="px-4 py-3">Action</th>}
+                        {isAdmin && <th class="px-4 py-3 text-center">Action</th>}
                       </tr>
                     </thead>
                     <tbody class="divide-y divide-appBorder">
@@ -361,9 +506,6 @@ const firebaseConfig = {
       const [showForm, setShowForm] = useState(false); const [editingTradeId, setEditingTradeId] = useState(null); const [filterTrader, setFilterTrader] = useState('All'); const [filterStatus, setFilterStatus] = useState('All'); const [selectedTradeIds, setSelectedTradeIds] = useState([]); 
       const [activeDropdown, setActiveDropdown] = useState(null);
       const [analyzerTrade, setAnalyzerTrade] = useState(null);
-      
-      // NEW: State for simulated Live Prices
-      const [livePrices, setLivePrices] = useState({});
 
       const emptyForm = { symbol: '', traderId: traders[0]?.id || '', buyDate: '', sellDate: '', qty: '', buyPrice: '', sellPrice: '', isIntraday: 'false', actualPnL: '', intradayGains: '', pat: '', notes: '', capitalInjected: '', linkedLedgerEntryId: null };
       const [formData, setFormData] = useState(emptyForm);
@@ -395,53 +537,19 @@ const firebaseConfig = {
           id: editingTradeId || Date.now(), symbol: formData.symbol.toUpperCase(), traderId: parseInt(formData.traderId), 
           buyDate: formData.buyDate, sellDate: isClosed ? formData.sellDate : null, qty: parseFloat(formData.qty), 
           buyPrice: parseFloat(formData.buyPrice), sellPrice: isClosed ? parseFloat(formData.sellPrice) : null, 
-          isIntraday: formData.isIntraday === 'true', 
-          actualPnL: isClosed ? parseFloat(formData.actualPnL || 0) : 0, 
-          intradayGains: isClosed ? parseFloat(formData.intradayGains || 0) : 0, 
-          pat: isClosed ? parseFloat(formData.pat || 0) : 0, 
+          isIntraday: formData.isIntraday === 'true', actualPnL: isClosed ? parseFloat(formData.actualPnL || 0) : 0, 
+          intradayGains: isClosed ? parseFloat(formData.intradayGains || 0) : 0, pat: isClosed ? parseFloat(formData.pat || 0) : 0, 
           notes: formData.notes, status: isClosed ? 'Closed' : 'Open', linkedLedgerEntryId: newLedgerId 
         }; 
         if (editingTradeId) setTrades(trades.map(t => t.id === editingTradeId ? newTrade : t)); else setTrades([...trades, newTrade]); setFormData(emptyForm); setShowForm(false); setEditingTradeId(null); 
       };
 
       const fileInputRef = useRef(null); const [importStatus, setImportStatus] = useState('idle'); const [csvHeaders, setCsvHeaders] = useState([]); const [csvRawData, setCsvRawData] = useState([]); const [columnMap, setColumnMap] = useState({}); const [unknownTraders, setUnknownTraders] = useState([]); const [traderMap, setTraderMap] = useState({}); const [importSummary, setImportSummary] = useState(null);
-      const expectedFields = [{ key: 'symbol', label: 'Symbol / Stock', required: true, match: ['symbol', 'stock'] }, { key: 'traderName', label: 'Trader Name', required: true, match: ['trader', 'member'] }, { key: 'buyDate', label: 'Buy Date', required: true, match: ['buy date', 'date'] }, { key: 'qty', label: 'Quantity', required: true, match: ['qty', 'quantity'] }, { key: 'buyPrice', label: 'Buy Price', required: true, match: ['buy price', 'entry'] }, { key: 'sellDate', label: 'Sell Date', required: false, match: ['sell date', 'exit date'] }, { key: 'sellPrice', label: 'Sell Price', required: false, match: ['sell price', 'exit price'] }, { key: 'isIntraday', label: 'Intraday?', required: false, match: ['intraday'] }, { key: 'actualPnL', label: 'Actual P&L', required: false, match: ['actual pnl', 'pnl', 'pre-tax'] }, { key: 'intradayGains', label: 'Intraday Gains', required: false, match: ['intra gain', 'intraday gain'] }, { key: 'pat', label: 'Post-Tax (PAT)', required: false, match: ['pat', 'post-tax'] }, { key: 'notes', label: 'Notes', required: false, match: ['notes', 'comments'] }];
+      const expectedFields = [{ key: 'symbol', label: 'Symbol / Stock', required: true, match: ['symbol', 'stock'] }, { key: 'traderName', label: 'Trader Name', required: true, match: ['trader', 'member'] }, { key: 'buyDate', label: 'Buy Date', required: true, match: ['buy date', 'date'] }, { key: 'qty', label: 'Quantity', required: true, match: ['qty', 'quantity'] }, { key: 'buyPrice', label: 'Buy Price', required: true, match: ['buy price', 'entry'] }, { key: 'sellDate', label: 'Sell Date', required: false, match: ['sell date', 'exit date'] }, { key: 'sellPrice', label: 'Sell Price', required: false, match: ['sell price', 'exit price'] }, { key: 'isIntraday', label: 'Intraday?', required: false, match: ['intraday'] }, { key: 'actualPnL', label: 'Pre-Tax Return', required: false, match: ['actual pnl', 'pnl', 'pre-tax'] }, { key: 'intradayGains', label: 'Intraday Gains', required: false, match: ['intra gain', 'intraday gain'] }, { key: 'pat', label: 'Post-Tax (PAT)', required: false, match: ['pat', 'post-tax'] }, { key: 'notes', label: 'Notes', required: false, match: ['notes', 'comments'] }];
       const handleFileUpload = (e) => { const file = e.target.files[0]; if (!file) return; Papa.parse(file, { header: true, skipEmptyLines: true, complete: (results) => { setCsvHeaders(results.meta.fields); setCsvRawData(results.data); const initialMap = {}; expectedFields.forEach(field => { const matchedHeader = results.meta.fields.find(h => field.match.some(alias => h.toLowerCase().includes(alias))); if (matchedHeader) initialMap[field.key] = matchedHeader; }); setColumnMap(initialMap); detectUnknownTraders(initialMap.traderName, results.data); setImportStatus('mapping'); } }); e.target.value = ''; };
       const detectUnknownTraders = (traderColName, data) => { if (!traderColName) { setUnknownTraders([]); return; } const uniqueNamesInCSV = [...new Set(data.map(row => (row[traderColName] || '').trim()).filter(n => n !== ''))]; const existingNamesUpper = traders.map(t => t.name.toUpperCase()); const missing = uniqueNamesInCSV.filter(name => !existingNamesUpper.includes(name.toUpperCase())); setUnknownTraders(missing); const initialTraderMap = {}; missing.forEach(m => initialTraderMap[m] = 'NEW'); setTraderMap(initialTraderMap); };
       const handleColumnMapChange = (fieldKey, selectedHeader) => { const newMap = { ...columnMap, [fieldKey]: selectedHeader }; setColumnMap(newMap); if (fieldKey === 'traderName') detectUnknownTraders(selectedHeader, csvRawData); };
-      
-      const executeImport = () => { 
-        let successfulTrades = []; let failedRows = []; let newlyAddedTraders = [...traders]; const parseNum = (val) => { if (!val) return null; const num = parseFloat(String(val).replace(/[^0-9.-]+/g,"")); return isNaN(num) ? null : num; }; 
-        csvRawData.forEach((row, index) => { 
-          const sym = row[columnMap.symbol]; const bDate = cleanDateForInput(row[columnMap.buyDate]); const bPrice = parseNum(row[columnMap.buyPrice]); const qty = parseNum(row[columnMap.qty]); const traderNameString = (row[columnMap.traderName] || '').trim(); 
-          if (!sym || !bDate || bPrice === null || qty === null || !traderNameString) { failedRows.push(`Row ${index + 2}: Missing mandatory fields`); return; } 
-          let finalTraderId = null; const existingMatch = newlyAddedTraders.find(t => t.name.toUpperCase() === traderNameString.toUpperCase()); 
-          if (existingMatch) { finalTraderId = existingMatch.id; } else { const decision = traderMap[traderNameString]; if (decision === 'NEW') { const newTrader = { id: Date.now() + Math.random(), name: traderNameString }; newlyAddedTraders.push(newTrader); finalTraderId = newTrader.id; } else { finalTraderId = parseInt(decision); } } 
-          const sDate = cleanDateForInput(row[columnMap.sellDate]) || null; const sPrice = parseNum(row[columnMap.sellPrice]); const isClosed = sDate && sPrice !== null; const rawIntraday = (row[columnMap.isIntraday] || '').toLowerCase(); const isIntraday = ['yes', 'true', '1', 'y'].includes(rawIntraday); 
-          let importedActual = parseNum(row[columnMap.actualPnL]) || 0; let importedIntra = parseNum(row[columnMap.intradayGains]) || 0; let importedPat = parseNum(row[columnMap.pat]); 
-          if (importedPat === null && isClosed) { let preTax = importedActual + importedIntra; importedPat = preTax > 0 ? preTax * 0.8 : preTax; } 
-          const trade = { id: Date.now() + Math.random(), symbol: sym.toUpperCase(), traderId: finalTraderId, buyDate: bDate, sellDate: isClosed ? sDate : null, qty: qty, buyPrice: bPrice, sellPrice: isClosed ? sPrice : null, isIntraday: isIntraday, actualPnL: isClosed ? importedActual : 0, intradayGains: isClosed ? importedIntra : 0, pat: isClosed ? (importedPat || 0) : 0, notes: row[columnMap.notes] || '', status: isClosed ? 'Closed' : 'Open', linkedLedgerEntryId: null }; successfulTrades.push(trade); 
-        }); 
-        setTraders(newlyAddedTraders); setTrades([...trades, ...successfulTrades]); setImportSummary({ successCount: successfulTrades.length, fails: failedRows }); setImportStatus('summary'); 
-      };
-
-      // NEW: Simulated Live Price Fetcher (Since true NSE APIs are blocked by browser CORS)
-      useEffect(() => {
-        const fetchSimulatedPrices = () => {
-          const openTrades = trades.filter(t => t.status === 'Open');
-          if(openTrades.length === 0) return;
-          
-          let newPrices = {...livePrices};
-          openTrades.forEach(t => {
-            // Simulate minor tick movements based on buy price
-            const fluctuation = (Math.random() - 0.5) * (t.buyPrice * 0.002);
-            newPrices[t.symbol] = (newPrices[t.symbol] || t.buyPrice) + fluctuation;
-          });
-          setLivePrices(newPrices);
-        };
-        const interval = setInterval(fetchSimulatedPrices, 2500); // Ticks every 2.5 seconds
-        return () => clearInterval(interval);
-      }, [trades, livePrices]);
+      const executeImport = () => { let successfulTrades = []; let failedRows = []; let newlyAddedTraders = [...traders]; const parseNum = (val) => { if (!val) return null; const num = parseFloat(String(val).replace(/[^0-9.-]+/g,"")); return isNaN(num) ? null : num; }; csvRawData.forEach((row, index) => { const sym = row[columnMap.symbol]; const bDate = cleanDateForInput(row[columnMap.buyDate]); const bPrice = parseNum(row[columnMap.buyPrice]); const qty = parseNum(row[columnMap.qty]); const traderNameString = (row[columnMap.traderName] || '').trim(); if (!sym || !bDate || bPrice === null || qty === null || !traderNameString) { failedRows.push(`Row ${index + 2}: Missing mandatory fields`); return; } let finalTraderId = null; const existingMatch = newlyAddedTraders.find(t => t.name.toUpperCase() === traderNameString.toUpperCase()); if (existingMatch) { finalTraderId = existingMatch.id; } else { const decision = traderMap[traderNameString]; if (decision === 'NEW') { const newTrader = { id: Date.now() + Math.random(), name: traderNameString }; newlyAddedTraders.push(newTrader); finalTraderId = newTrader.id; } else { finalTraderId = parseInt(decision); } } const sDate = cleanDateForInput(row[columnMap.sellDate]) || null; const sPrice = parseNum(row[columnMap.sellPrice]); const isClosed = sDate && sPrice !== null; const rawIntraday = (row[columnMap.isIntraday] || '').toLowerCase(); const isIntraday = ['yes', 'true', '1', 'y'].includes(rawIntraday); let importedActual = parseNum(row[columnMap.actualPnL]) || 0; let importedIntra = parseNum(row[columnMap.intradayGains]) || 0; let importedPat = parseNum(row[columnMap.pat]); if (importedPat === null && isClosed) { let preTax = importedActual + importedIntra; importedPat = preTax > 0 ? preTax * 0.8 : preTax; } const trade = { id: Date.now() + Math.random(), symbol: sym.toUpperCase(), traderId: finalTraderId, buyDate: bDate, sellDate: isClosed ? sDate : null, qty: qty, buyPrice: bPrice, sellPrice: isClosed ? sPrice : null, isIntraday: isIntraday, actualPnL: isClosed ? importedActual : 0, intradayGains: isClosed ? importedIntra : 0, pat: isClosed ? (importedPat || 0) : 0, notes: row[columnMap.notes] || '', status: isClosed ? 'Closed' : 'Open', linkedLedgerEntryId: null }; successfulTrades.push(trade); }); setTraders(newlyAddedTraders); setTrades([...trades, ...successfulTrades]); setImportSummary({ successCount: successfulTrades.length, fails: failedRows }); setImportStatus('summary'); };
 
       const filteredTrades = trades.filter(t => (filterTrader === 'All' || t.traderId === parseInt(filterTrader)) && (filterStatus === 'All' || t.status === filterStatus));
       const totalActualPnL = filteredTrades.reduce((sum, t) => sum + (t.actualPnL || 0) + (t.intradayGains || 0), 0); 
@@ -452,14 +560,10 @@ const firebaseConfig = {
 
       return (
         <div class="animate-fade-in">
-          {/* Hindsight Analyzer Modal */}
           <HindsightAnalyzer trade={analyzerTrade} onClose={() => setAnalyzerTrade(null)} />
 
           <div class="flex justify-between items-center mb-6">
-            <h1 class="text-2xl font-semibold text-white flex items-center">
-              Trade Log
-              {trades.some(t=>t.status==='Open') && <span class="ml-3 px-2 py-0.5 bg-appGreen/10 text-appGreen text-xs rounded border border-appGreen/20 flex items-center"><span class="w-2 h-2 rounded-full bg-appGreen mr-1 animate-pulse"></span>Live Pricing Simulator Active</span>}
-            </h1>
+            <h1 class="text-2xl font-semibold text-white">Trade Log</h1>
             {isAdmin && (
               <div class="space-x-3 flex items-center">
                 {selectedTradeIds.length > 0 && <button onClick={handleBulkDelete} class="bg-appRed text-white font-semibold px-4 py-2 rounded-lg hover:bg-red-500 transition animate-fade-in">Delete Selected ({selectedTradeIds.length})</button>}
@@ -517,16 +621,8 @@ const firebaseConfig = {
                     <th class="p-2">Qty</th>
                     <th class="p-2">Prices (B/S)</th>
                     <th class="p-2 border-l border-appBorder bg-white/5">Invested</th>
-                    {filterStatus === 'Open' ? (
-                      <th class="p-2 border-l border-appBorder bg-white/5 text-appAccent">Live Price</th>
-                    ) : (
-                      <th class="p-2 border-l border-appBorder bg-white/5 text-gray-300">Pre-Tax P&L</th>
-                    )}
-                    {filterStatus === 'Open' ? (
-                      <th class="p-2 text-appAccent">Live P&L</th>
-                    ) : (
-                      <th class="p-2 text-gray-300">+ Intra Gains</th>
-                    )}
+                    <th class="p-2 border-l border-appBorder bg-white/5 text-gray-300">Pre-Tax P&L</th>
+                    <th class="p-2 text-gray-300">+ Intra Gains</th>
                     <th class="p-2 text-gray-300">PAT (-20%)</th>
                     <th class="p-2 border-l border-appBorder bg-white/5 font-semibold text-appAccent">Net Return <span class="text-[9px] font-normal block">-₹15.34 DP</span></th>
                     {isAdmin && <th class="p-2 text-center">Action</th>}
@@ -538,14 +634,9 @@ const firebaseConfig = {
                     const netReturn = t.status === 'Closed' ? invested + t.pat - 15.34 : null;
                     const ig = t.intradayGains || 0;
                     
-                    // Live Logic
-                    const liveP = livePrices[t.symbol] || t.buyPrice;
-                    const livePnL = (liveP - t.buyPrice) * t.qty;
-                    
                     return (
                       <tr key={t.id} class="hover:bg-white/5 transition">
                         {isAdmin && <td class="p-2"><input type="checkbox" class="accent-appAccent cursor-pointer" checked={selectedTradeIds.includes(t.id)} onChange={(e) => { if (e.target.checked) setSelectedTradeIds([...selectedTradeIds, t.id]); else setSelectedTradeIds(selectedTradeIds.filter(id => id !== t.id)); }} /></td>}
-                        
                         <td class="p-2 flex items-center space-x-2">
                           <div>
                             <div class="font-bold text-white tracking-wide">{t.symbol} {t.isIntraday && <span class="text-[9px] bg-appAccent/20 text-appAccent px-1 rounded ml-1">INT</span>}</div>
@@ -555,31 +646,19 @@ const firebaseConfig = {
                             <button onClick={() => setAnalyzerTrade(t)} class="text-xl hover:scale-110 transition-transform" title="Hindsight Analyzer">📈</button>
                           )}
                         </td>
-                        
                         <td class="p-2 text-gray-300 font-medium">{getTraderName(t.traderId)}</td>
                         <td class="p-2 text-gray-300"><div><span class="text-gray-500 text-[10px]">B:</span> {t.buyDate}</div><div><span class="text-gray-500 text-[10px]">S:</span> {t.status === 'Closed' ? t.sellDate : '-'}</div><div class="text-[10px] text-gray-500">{t.status === 'Closed' ? `${getDaysHeld(t)} days` : ''}</div></td>
                         <td class="p-2 text-gray-300">{t.qty}</td>
                         <td class="p-2 text-gray-300"><div><span class="text-gray-500 text-[10px]">B:</span> {formatPrice(t.buyPrice)}</div><div><span class="text-gray-500 text-[10px]">S:</span> {t.status === 'Closed' ? formatPrice(t.sellPrice) : '-'}</div></td>
-                        
                         <td class="p-2 border-l border-appBorder bg-white/5 text-gray-300">{formatMoney(invested)}</td>
                         
-                        {/* Conditional Columns based on Open/Closed */}
-                        {t.status === 'Open' ? (
-                          <React.Fragment>
-                            <td class="p-2 border-l border-appBorder bg-white/5 font-bold text-appAccent">{formatPrice(liveP)}</td>
-                            <td class={`p-2 font-bold ${livePnL >= 0 ? 'text-appGreen' : 'text-appRed'}`}>{formatMoney(livePnL)}</td>
-                          </React.Fragment>
-                        ) : (
-                          <React.Fragment>
-                            <td class={`p-2 border-l border-appBorder bg-white/5 font-bold ${t.actualPnL >= 0 ? 'text-appGreen' : 'text-appRed'}`}>{formatMoney(t.actualPnL)}</td>
-                            <td class={`p-2 font-bold ${ig >= 0 ? 'text-appGreen' : 'text-appRed'}`}>{formatMoney(ig)}</td>
-                          </React.Fragment>
-                        )}
+                        {/* STATIC VALUES ONLY - NO LIVE CALCS HERE */}
+                        <td class={`p-2 border-l border-appBorder bg-white/5 font-bold ${t.status === 'Open' ? 'text-gray-500' : (t.actualPnL >= 0 ? 'text-appGreen' : 'text-appRed')}`}>{t.status === 'Closed' ? formatMoney(t.actualPnL) : '-'}</td>
+                        <td class={`p-2 font-bold ${t.status === 'Open' ? 'text-gray-500' : (ig >= 0 ? 'text-appGreen' : 'text-appRed')}`}>{t.status === 'Closed' ? formatMoney(ig) : '-'}</td>
                         
                         <td class={`p-2 font-bold ${t.status === 'Open' ? 'text-gray-500' : (t.pat >= 0 ? 'text-appGreen' : 'text-appRed')}`}>{t.status === 'Closed' ? formatMoney(t.pat) : '-'}</td>
                         <td class="p-2 border-l border-appBorder bg-white/5 font-semibold text-appAccent">{t.status === 'Closed' ? formatMoney(netReturn) : '-'}</td>
                         
-                        {/* 3-DOT MENU */}
                         {isAdmin && (
                           <td class="p-2 text-center relative">
                             <button onClick={() => setActiveDropdown(activeDropdown === t.id ? null : t.id)} class="text-gray-400 hover:text-white px-2 rounded hover:bg-white/10 font-bold">⋮</button>
@@ -611,34 +690,10 @@ const firebaseConfig = {
       );
     }
 
-    function DashboardCharts({ trades, traders }) {
-      const pnlChartRef = useRef(null); const typeChartRef = useRef(null);
-      useEffect(() => {
-        Chart.defaults.color = '#9CA3AF'; Chart.defaults.borderColor = '#2A364F';
-        const closedTrades = trades.filter(t => t.status === 'Closed').sort((a, b) => new Date(a.sellDate) - new Date(b.sellDate));
-        const pnlLabels = closedTrades.map(t => t.symbol); 
-        const pnlData = closedTrades.map(t => (t.actualPnL || 0) + (t.intradayGains || 0)); 
-        const pnlColors = pnlData.map(val => val >= 0 ? '#10B981' : '#EF4444'); 
-        let intradayCount = 0; let deliveryCount = 0; closedTrades.forEach(t => { if (t.isIntraday) intradayCount++; else deliveryCount++; });
-
-        const pnlChart = new Chart(pnlChartRef.current, { type: 'bar', data: { labels: pnlLabels, datasets: [{ data: pnlData, backgroundColor: pnlColors, borderRadius: 4 }] }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } } });
-        const typeChart = new Chart(typeChartRef.current, { type: 'doughnut', data: { labels: ['Intraday', 'Delivery'], datasets: [{ data: [intradayCount, deliveryCount], backgroundColor: ['#38BDF8', '#6366F1'], borderWidth: 0 }] }, options: { responsive: true, maintainAspectRatio: false, cutout: '70%' } });
-
-        return () => { pnlChart.destroy(); typeChart.destroy(); };
-      }, [trades, traders]);
-
-      return (
-        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mt-8 animate-fade-in">
-          <div class="bg-appNavy border border-appBorder rounded-xl p-5 lg:col-span-2 h-72 flex flex-col"><h3 class="text-white font-medium mb-4">Trade P&L History</h3><div class="relative flex-1 min-h-0"><canvas ref={pnlChartRef}></canvas></div></div>
-          <div class="bg-appNavy border border-appBorder rounded-xl p-5 h-72 flex flex-col lg:col-span-1"><h3 class="text-white font-medium mb-2">Intraday vs Delivery</h3><div class="relative flex-1 min-h-0"><canvas ref={typeChartRef}></canvas></div></div>
-        </div>
-      );
-    }
-
     function App() {
       const ADMIN_PIN = "1234"; 
       const [isAdmin, setIsAdmin] = useState(false);
-      const [currentView, setCurrentView] = useState('tradelog'); 
+      const [currentView, setCurrentView] = useState('dashboard'); 
       
       const defaultTraders = [{ id: 1, name: 'Anil' }, { id: 2, name: 'Kota' }, { id: 3, name: 'Santosh' }, { id: 4, name: 'Anirudha' }];
       
@@ -809,7 +864,9 @@ const firebaseConfig = {
                     </div>
                   </div>
 
-                  <DashboardCharts trades={trades} traders={traders} />
+                  {/* NEW: LIVE OPEN TRADES TRACKER ON DASHBOARD */}
+                  <LiveOpenTradesTracker trades={trades} traders={traders} />
+
                 </div>
               )}
               
