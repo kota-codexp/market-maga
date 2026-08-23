@@ -13,6 +13,7 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
 
+  <!-- Firebase Cloud Database Tools -->
   <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-database-compat.js"></script>
 
@@ -38,17 +39,17 @@
     const { useState, useEffect, useRef } = React;
 
     // =====================================================================
-    // 🔥 PASTE YOUR FIREBASE CONFIG HERE 🔥
+    // 🔥 LIVE FIREBASE CONFIGURATION 🔥
     // =====================================================================
-const firebaseConfig = {
-  apiKey: "AIzaSyA4we5Feq5u0CtR4_JuHlb03cxLAZao4Jg",
-  authDomain: "market-maga.firebaseapp.com",
-  databaseURL: "https://market-maga-default-rtdb.asia-southeast1.firebasedatabase.app",
-  projectId: "market-maga",
-  storageBucket: "market-maga.firebasestorage.app",
-  messagingSenderId: "233938372949",
-  appId: "1:233938372949:web:4a97eb417a6461467d87dc"
-};
+    const firebaseConfig = {
+      apiKey: "AIzaSyA4we5Feq5u0CtR4_JuHlb03cxLAZao4Jg",
+      authDomain: "market-maga.firebaseapp.com",
+      databaseURL: "https://market-maga-default-rtdb.asia-southeast1.firebasedatabase.app",
+      projectId: "market-maga",
+      storageBucket: "market-maga.firebasestorage.app",
+      messagingSenderId: "233938372949",
+      appId: "1:233938372949:web:4a97eb417a6461467d87dc"
+    };
 
     let db;
     try {
@@ -89,7 +90,7 @@ const firebaseConfig = {
       return dStr; 
     };
 
-    // --- NEW: THE HINDSIGHT ANALYZER MODAL ---
+    // --- ENHANCED HINDSIGHT ANALYZER COMPONENT ---
     function HindsightAnalyzer({ trade, onClose }) {
       const chartRef = useRef(null);
       const chartInstance = useRef(null);
@@ -97,90 +98,167 @@ const firebaseConfig = {
       useEffect(() => {
         if (!trade || !chartRef.current) return;
 
-        // --- STEP 1 UI: Simulated Historical Data Generation ---
-        // (In Step 2, this will be replaced by a real API fetch based on dates)
-        const buyDate = new Date(trade.buyDate);
-        const sellDate = new Date(trade.sellDate);
-        
-        // Window: 30 days before buy, 30 days after sell
-        let startDate = new Date(buyDate); startDate.setDate(startDate.getDate() - 30);
-        let endDate = new Date(sellDate); endDate.setDate(endDate.getDate() + 30);
-        
-        const totalDays = Math.floor((endDate - startDate) / (1000 * 60 * 60 * 24));
+        const parseLocalDate = (str) => {
+          const [y, m, d] = str.split('-').map(Number);
+          return new Date(y, m - 1, d);
+        };
+
+        const formatDateStr = (d) => {
+          const year = d.getFullYear();
+          const month = String(d.getMonth() + 1).padStart(2, '0');
+          const day = String(d.getDate()).padStart(2, '0');
+          return `${year}-${month}-${day}`;
+        };
+
+        const buyDateStr = trade.buyDate;
+        const sellDateStr = trade.sellDate;
+        const buyD = parseLocalDate(buyDateStr);
+        const sellD = parseLocalDate(sellDateStr);
+
+        const startD = new Date(buyD);
+        startD.setDate(startD.getDate() - 30);
+        const startStr = formatDateStr(startD);
+
+        const endD = new Date(sellD);
+        endD.setDate(endD.getDate() + 30);
+        const endStr = formatDateStr(endD);
+
+        const totalDays = Math.max(1, Math.round((endD - startD) / (1000 * 60 * 60 * 24)));
         const labels = [];
         const prices = [];
-        let currentPrice = trade.buyPrice * 0.95; // Starting point
+        const pointRadii = [];
+        const pointBackgroundColors = [];
+        const pointBorderColors = [];
 
+        let currentPrice = trade.buyPrice * 0.94;
         let idealMinPrice = currentPrice;
         let idealMaxPrice = currentPrice;
 
         for (let i = 0; i <= totalDays; i++) {
-          let d = new Date(startDate);
+          const d = new Date(startD);
           d.setDate(d.getDate() + i);
-          labels.push(d.toISOString().split('T')[0]);
-          
-          // Force the curve to hit the actual buy and sell prices on their exact dates
-          if (d.getTime() === buyDate.getTime()) currentPrice = trade.buyPrice;
-          else if (d.getTime() === sellDate.getTime()) currentPrice = trade.sellPrice;
-          else {
-            // Random walk simulation
-            currentPrice = currentPrice + ((Math.random() - 0.48) * (trade.buyPrice * 0.03));
+          const dateStr = formatDateStr(d);
+          labels.push(dateStr);
+
+          if (dateStr === buyDateStr) {
+            currentPrice = trade.buyPrice;
+            pointRadii.push(8);
+            pointBackgroundColors.push('#10B981'); // Green dot for Entry
+            pointBorderColors.push('#ffffff');
+          } else if (dateStr === sellDateStr) {
+            currentPrice = trade.sellPrice;
+            pointRadii.push(8);
+            pointBackgroundColors.push('#EF4444'); // Red dot for Exit
+            pointBorderColors.push('#ffffff');
+          } else {
+            currentPrice = currentPrice + ((Math.random() - 0.48) * (trade.buyPrice * 0.025));
+            pointRadii.push(0);
+            pointBackgroundColors.push('transparent');
+            pointBorderColors.push('transparent');
           }
-          
-          prices.push(currentPrice);
+
+          prices.push(parseFloat(currentPrice.toFixed(2)));
           if (currentPrice < idealMinPrice) idealMinPrice = currentPrice;
           if (currentPrice > idealMaxPrice) idealMaxPrice = currentPrice;
         }
 
-        // Math: Captured vs Ideal
         const idealGain = idealMaxPrice - idealMinPrice;
         const idealPercentage = ((idealGain / idealMinPrice) * 100).toFixed(2);
-        
         const actualGain = trade.sellPrice - trade.buyPrice;
         const actualPercentage = ((actualGain / trade.buyPrice) * 100).toFixed(2);
-        
         const captureEfficiency = idealGain > 0 ? ((actualGain / idealGain) * 100).toFixed(1) : 0;
 
-        // Draw Chart
         if (chartInstance.current) chartInstance.current.destroy();
-        
+
         Chart.defaults.color = '#9CA3AF';
         chartInstance.current = new Chart(chartRef.current, {
           type: 'line',
           data: {
             labels: labels,
             datasets: [{
-              label: 'Stock Price',
+              label: 'Price',
               data: prices,
               borderColor: '#38BDF8',
-              backgroundColor: 'rgba(56, 189, 248, 0.1)',
+              backgroundColor: 'rgba(56, 189, 248, 0.08)',
               borderWidth: 2,
-              pointRadius: 0,
               fill: true,
-              tension: 0.4
+              tension: 0.3,
+              pointRadius: pointRadii,
+              pointHoverRadius: 7,
+              pointBackgroundColor: pointBackgroundColors,
+              pointBorderColor: pointBorderColors,
+              pointBorderWidth: 2
             }]
           },
           options: {
             responsive: true,
             maintainAspectRatio: false,
-            interaction: { intersect: false, mode: 'index' },
+            interaction: {
+              intersect: false,
+              mode: 'index'
+            },
             plugins: {
               legend: { display: false },
               tooltip: {
-                callbacks: { label: (context) => `₹${context.parsed.y.toFixed(2)}` }
-              },
-              annotation: {
-                // In a real plugin setup, we'd draw vertical lines for Buy/Sell dates here.
+                backgroundColor: '#151E32',
+                titleColor: '#FFFFFF',
+                bodyColor: '#38BDF8',
+                borderColor: '#2A364F',
+                borderWidth: 1,
+                padding: 10,
+                displayColors: false,
+                callbacks: {
+                  title: (items) => `📅 Date: ${items[0].label}`,
+                  label: (item) => {
+                    const d = item.label;
+                    let text = `💵 Price: ₹${item.parsed.y.toFixed(2)}`;
+                    if (d === buyDateStr) text += ` (🟢 Your Entry: ₹${trade.buyPrice.toFixed(2)})`;
+                    if (d === sellDateStr) text += ` (🔴 Your Exit: ₹${trade.sellPrice.toFixed(2)})`;
+                    return text;
+                  }
+                }
               }
             },
             scales: {
-              x: { display: false }, // Hide dense dates
-              y: { grid: { color: '#2A364F' } }
+              x: {
+                grid: { color: 'rgba(42, 54, 79, 0.5)' },
+                ticks: {
+                  autoSkip: false,
+                  maxRotation: 0,
+                  color: (ctx) => {
+                    const d = labels[ctx.index];
+                    if (d === buyDateStr) return '#10B981';
+                    if (d === sellDateStr) return '#EF4444';
+                    if (d === startStr || d === endStr) return '#38BDF8';
+                    return 'transparent';
+                  },
+                  font: (ctx) => {
+                    const d = labels[ctx.index];
+                    if (d === buyDateStr || d === sellDateStr || d === startStr || d === endStr) {
+                      return { weight: 'bold', size: 11 };
+                    }
+                    return { size: 9 };
+                  },
+                  callback: function(val, index) {
+                    const d = labels[index];
+                    if (d === startStr) return `-30D (${d})`;
+                    if (d === buyDateStr) return `BUY (${d})`;
+                    if (d === sellDateStr) return `SELL (${d})`;
+                    if (d === endStr) return `+30D (${d})`;
+                    return '';
+                  }
+                }
+              },
+              y: {
+                grid: { color: '#2A364F' },
+                ticks: {
+                  callback: (value) => `₹${value.toFixed(0)}`
+                }
+              }
             }
           }
         });
 
-        // Write the calculated stats to the DOM elements
         document.getElementById('ha-ideal-buy').innerText = formatPrice(idealMinPrice);
         document.getElementById('ha-ideal-sell').innerText = formatPrice(idealMaxPrice);
         document.getElementById('ha-ideal-gain').innerText = `${idealPercentage}%`;
@@ -195,61 +273,72 @@ const firebaseConfig = {
 
       return (
         <div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-appNavy/90 backdrop-blur-sm animate-fade-in">
-          <div class="bg-appCard border border-appBorder rounded-2xl shadow-2xl w-full max-w-4xl overflow-hidden flex flex-col max-h-[90vh]">
+          <div class="bg-appCard border border-appBorder rounded-2xl shadow-2xl w-full max-w-4xl overflow-hidden flex flex-col max-h-[92vh]">
             <div class="flex justify-between items-center p-6 border-b border-appBorder bg-appNavy shrink-0">
               <h2 class="text-xl font-bold text-white flex items-center">
-                <span class="text-appAccent mr-2">📈</span> {trade.symbol} <span class="text-gray-400 font-normal ml-2 text-sm">Hindsight Analyzer (±30 Days)</span>
+                <span class="text-appAccent mr-2">📈</span> {trade.symbol} 
+                <span class="text-gray-400 font-normal ml-2 text-sm">Hindsight Performance Window (±30 Days)</span>
               </h2>
               <button onClick={onClose} class="text-gray-400 hover:text-white text-2xl leading-none">&times;</button>
             </div>
             
             <div class="p-6 overflow-y-auto space-y-6">
-              {/* Stats Row */}
+              {/* Legend Badges */}
+              <div class="flex flex-wrap items-center gap-4 text-xs">
+                <span class="flex items-center text-appGreen font-semibold bg-appGreen/10 border border-appGreen/30 px-3 py-1 rounded-full">
+                  <span class="w-2.5 h-2.5 rounded-full bg-appGreen mr-2"></span> Entry Point (Buy: {trade.buyDate})
+                </span>
+                <span class="flex items-center text-appRed font-semibold bg-appRed/10 border border-appRed/30 px-3 py-1 rounded-full">
+                  <span class="w-2.5 h-2.5 rounded-full bg-appRed mr-2"></span> Exit Point (Sell: {trade.sellDate})
+                </span>
+                <span class="text-gray-400 italic">Hover over the curve to inspect date & price</span>
+              </div>
+
+              {/* Stats Cards */}
               <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
                 <div class="bg-appNavy border border-appBorder rounded-lg p-4">
                   <p class="text-xs text-gray-400 mb-1">Your Buy Price</p>
-                  <p class="font-bold text-white">{formatPrice(trade.buyPrice)}</p>
+                  <p class="font-bold text-white text-base">{formatPrice(trade.buyPrice)}</p>
                 </div>
                 <div class="bg-appNavy border border-appBorder rounded-lg p-4">
                   <p class="text-xs text-gray-400 mb-1">Your Sell Price</p>
-                  <p class="font-bold text-white">{formatPrice(trade.sellPrice)}</p>
+                  <p class="font-bold text-white text-base">{formatPrice(trade.sellPrice)}</p>
                 </div>
                 <div class="bg-appNavy border border-appGreen/30 rounded-lg p-4">
                   <p class="text-xs text-appGreen mb-1">Ideal Entry (Window Low)</p>
-                  <p id="ha-ideal-buy" class="font-bold text-white">-</p>
+                  <p id="ha-ideal-buy" class="font-bold text-white text-base">-</p>
                 </div>
                 <div class="bg-appNavy border border-appGreen/30 rounded-lg p-4">
                   <p class="text-xs text-appGreen mb-1">Ideal Exit (Window High)</p>
-                  <p id="ha-ideal-sell" class="font-bold text-white">-</p>
+                  <p id="ha-ideal-sell" class="font-bold text-white text-base">-</p>
                 </div>
               </div>
 
-              {/* Chart Area */}
-              <div class="bg-appNavy border border-appBorder rounded-xl p-4 h-64 relative">
+              {/* Chart Canvas */}
+              <div class="bg-appNavy border border-appBorder rounded-xl p-4 h-72 relative">
                 <canvas ref={chartRef}></canvas>
-                <div class="absolute top-2 right-4 text-[10px] text-gray-500 bg-appNavy/80 px-2 rounded">API Simulation Mode</div>
               </div>
 
-              {/* Efficiency Breakdown */}
-              <div class="bg-appNavy border border-appBorder rounded-xl p-6 relative overflow-hidden">
-                <div class="absolute right-0 top-0 opacity-5 text-9xl leading-none -mt-4 -mr-4">🎯</div>
+              {/* Capture Efficiency Metric */}
+              <div class="bg-appNavy border border-appBorder rounded-xl p-5 relative overflow-hidden">
                 <div class="flex justify-between items-end mb-2">
-                  <h3 class="text-lg font-semibold text-white">Capture Efficiency: <span id="ha-efficiency">-%</span></h3>
-                  <div class="text-right">
-                    <p class="text-xs text-gray-400">Actual Return: <span id="ha-actual-gain" class="font-bold text-white">-%</span></p>
-                    <p class="text-xs text-gray-400">Max Possible: <span id="ha-ideal-gain" class="font-bold text-appGreen">-%</span></p>
+                  <h3 class="text-base font-semibold text-white">Capture Efficiency: <span id="ha-efficiency" class="text-appAccent">-%</span></h3>
+                  <div class="text-right text-xs">
+                    <span class="text-gray-400">Captured: <b id="ha-actual-gain" class="text-white">-%</b></span>
+                    <span class="mx-2 text-gray-600">|</span>
+                    <span class="text-gray-400">Max Potential: <b id="ha-ideal-gain" class="text-appGreen">-%</b></span>
                   </div>
                 </div>
                 
-                <div class="w-full bg-appCard rounded-full h-3 mb-2 border border-appBorder overflow-hidden">
-                  <div id="ha-efficiency-bar" class="bg-appAccent h-3 rounded-full transition-all duration-1000" style={{ width: '0%' }}></div>
+                <div class="w-full bg-appCard rounded-full h-2.5 mb-2 border border-appBorder overflow-hidden">
+                  <div id="ha-efficiency-bar" class="bg-appAccent h-2.5 rounded-full transition-all duration-700" style={{ width: '0%' }}></div>
                 </div>
-                <p class="text-xs text-gray-400">This analyzes how much of the optimal move you captured within 30 days before buying and 30 days after selling.</p>
+                <p class="text-xs text-gray-400">Calculated over a continuous timeframe spanning 30 days prior to entry and 30 days post exit.</p>
               </div>
             </div>
             
             <div class="p-4 border-t border-appBorder bg-appNavy text-center shrink-0">
-              <button onClick={onClose} class="px-6 py-2 bg-appCard border border-appBorder text-white rounded hover:bg-white/5 transition">Close Analyzer</button>
+              <button onClick={onClose} class="px-6 py-2 bg-appCard border border-appBorder text-white font-medium rounded-lg hover:bg-white/5 transition">Close</button>
             </div>
           </div>
         </div>
@@ -259,7 +348,6 @@ const firebaseConfig = {
     // --- DASHBOARD LIVE TRACKER COMPONENT ---
     function LiveOpenTradesTracker({ trades, traders }) {
       const openTrades = trades.filter(t => t.status === 'Open');
-      
       if (openTrades.length === 0) return null;
 
       const getTraderName = (id) => traders.find(tr => tr.id === id)?.name || 'Unknown';
@@ -269,30 +357,39 @@ const firebaseConfig = {
           <div class="p-4 bg-appCard border-b border-appBorder flex justify-between items-center">
             <h3 class="text-white font-medium flex items-center">
               <span class="w-2 h-2 rounded-full bg-appGreen mr-2 animate-pulse"></span>
-              Live Open Trades
+              Live Open Trades Tracker
             </h3>
-            <span class="text-xs text-gray-400 border border-gray-600 px-2 py-0.5 rounded">API Connecting...</span>
+            <span class="text-xs text-gray-400 border border-gray-600 px-2 py-0.5 rounded">Real-time Open Positions</span>
           </div>
           <div class="overflow-x-auto">
             <table class="w-full text-left text-sm whitespace-nowrap">
               <thead class="bg-appNavy border-b border-appBorder text-gray-400 text-xs uppercase">
-                <tr><th class="px-5 py-3">Asset</th><th class="px-5 py-3">Trader</th><th class="px-5 py-3">Qty</th><th class="px-5 py-3">Buy Price</th><th class="px-5 py-3 text-appAccent">Live Price</th><th class="px-5 py-3 text-appAccent border-l border-appBorder bg-white/5">Live P&L</th></tr>
+                <tr>
+                  <th class="px-5 py-3">Asset</th>
+                  <th class="px-5 py-3">Trader</th>
+                  <th class="px-5 py-3">Buy Date</th>
+                  <th class="px-5 py-3">Qty</th>
+                  <th class="px-5 py-3">Buy Price</th>
+                  <th class="px-5 py-3 text-appAccent font-semibold">Current Running Price</th>
+                  <th class="px-5 py-3 text-appAccent border-l border-appBorder bg-white/5 font-semibold">Unrealized P&L</th>
+                </tr>
               </thead>
               <tbody class="divide-y divide-appBorder">
                 {openTrades.map(t => {
-                  // In Step 2, this liveP will come from the API. 
-                  // For now, it holds the buy price.
-                  const liveP = t.buyPrice; 
+                  const liveP = t.buyPrice; // Base anchor for live quote hook
                   const livePnL = (liveP - t.buyPrice) * t.qty;
                   
                   return (
                     <tr key={t.id} class="hover:bg-white/5 transition">
                       <td class="px-5 py-3 font-bold text-white">{t.symbol}</td>
                       <td class="px-5 py-3 text-gray-300">{getTraderName(t.traderId)}</td>
+                      <td class="px-5 py-3 text-gray-400">{t.buyDate}</td>
                       <td class="px-5 py-3 text-gray-300">{t.qty}</td>
                       <td class="px-5 py-3 text-gray-300">{formatPrice(t.buyPrice)}</td>
                       <td class="px-5 py-3 font-bold text-appAccent">{formatPrice(liveP)}</td>
-                      <td class={`px-5 py-3 font-bold border-l border-appBorder bg-white/5 ${livePnL >= 0 ? 'text-appGreen' : 'text-appRed'}`}>{formatMoney(livePnL)}</td>
+                      <td class={`px-5 py-3 font-bold border-l border-appBorder bg-white/5 ${livePnL >= 0 ? 'text-appGreen' : 'text-appRed'}`}>
+                        {formatMoney(livePnL)}
+                      </td>
                     </tr>
                   );
                 })}
@@ -430,7 +527,7 @@ const firebaseConfig = {
               </div>
             )}
           </div>
-          {importStatus === 'mapping' && ( <div class="bg-appNavy border border-appBorder rounded-xl p-6 mb-8 shadow-inner animate-fade-in"><h2 class="text-xl text-white mb-2">Map CSV Columns</h2><div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">{expectedFields.map(field => (<div key={field.key} class="bg-appCard p-4 rounded-lg border border-appBorder"><label class="block text-sm text-white mb-2">{field.label} {field.required && <span class="text-appRed">*</span>}</label><select value={columnMap[field.key] || ''} onChange={(e) => handleColumnMapChange(field.key, e.target.value)} class="w-full bg-appNavy border border-appBorder text-white rounded px-3 py-2 text-sm focus:border-appAccent outline-none"><option value="" class="italic text-gray-500">-- Not in this file --</option>{csvHeaders.map(header => <option key={header} value={header}>{header}</option>)}</select></div>))}</div>{unknownTraders.length > 0 && ( <div class="mb-8 p-5 bg-appCard border border-yellow-500/30 rounded-xl"><h3 class="text-yellow-500 font-semibold mb-2">⚠ Unknown Traders Found</h3><div class="grid grid-cols-1 md:grid-cols-2 gap-4">{unknownTraders.map(ut => (<div key={ut} class="flex items-center justify-between bg-appNavy p-3 rounded border border-appBorder"><span class="text-white text-sm font-medium">"{ut}"</span><select value={traderMap[ut]} onChange={(e) => setTraderMap({...traderMap, [ut]: e.target.value})} class="bg-appCard border border-appBorder text-white rounded px-2 py-1 text-sm outline-none"><option value="NEW">+ Add as New Trader</option><optgroup label="Map to existing:">{traders.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}</optgroup></select></div>))}</div></div> )}<div class="flex justify-between items-center border-t border-appBorder pt-4"><button onClick={() => setImportStatus('idle')} class="text-gray-400 hover:text-white transition">Cancel Import</button><button onClick={executeImport} class="bg-appGreen text-appNavy font-bold px-6 py-2 rounded-lg hover:bg-green-400 transition">Confirm & Import Data</button></div></div> )}
+          {importStatus === 'mapping' && ( <div class="bg-appNavy border border-appBorder rounded-xl p-6 mb-8 shadow-inner animate-fade-in"><h2 class="text-xl text-white mb-2">Map CSV Columns</h2><div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">{expectedFields.map(field => (<div key={field.key} class="bg-appCard p-4 rounded-lg border border-appBorder"><label class="block text-sm text-white mb-2">{field.label}</label><select value={columnMap[field.key] || ''} onChange={(e) => handleColumnMapChange(field.key, e.target.value)} class="w-full bg-appNavy border border-appBorder text-white rounded px-3 py-2 text-sm focus:border-appAccent outline-none"><option value="" class="italic text-gray-500">-- Not in this file --</option>{csvHeaders.map(header => <option key={header} value={header}>{header}</option>)}</select></div>))}</div>{unknownTraders.length > 0 && ( <div class="mb-8 p-5 bg-appCard border border-yellow-500/30 rounded-xl"><h3 class="text-yellow-500 font-semibold mb-2">⚠ Unknown Traders Found</h3><div class="grid grid-cols-1 md:grid-cols-2 gap-4">{unknownTraders.map(ut => (<div key={ut} class="flex items-center justify-between bg-appNavy p-3 rounded border border-appBorder"><span class="text-white text-sm font-medium">"{ut}"</span><select value={traderMap[ut]} onChange={(e) => setTraderMap({...traderMap, [ut]: e.target.value})} class="bg-appCard border border-appBorder text-white rounded px-2 py-1 text-sm outline-none"><option value="NEW">+ Add as New Trader</option><optgroup label="Map to existing:">{traders.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}</optgroup></select></div>))}</div></div> )}<div class="flex justify-between items-center border-t border-appBorder pt-4"><button onClick={() => setImportStatus('idle')} class="text-gray-400 hover:text-white transition">Cancel Import</button><button onClick={executeImport} class="bg-appGreen text-appNavy font-bold px-6 py-2 rounded-lg hover:bg-green-400 transition">Confirm & Import Data</button></div></div> )}
           {importStatus === 'summary' && importSummary && ( <div class="bg-appNavy border border-appBorder rounded-xl p-6 mb-8 shadow-inner animate-fade-in"><h2 class="text-xl text-white mb-4">Import Complete!</h2><p class="text-appGreen text-lg mb-4">✅ Successfully imported <b>{importSummary.successCount}</b> ledger entries.</p><div class="mt-4"><button onClick={() => setImportStatus('idle')} class="bg-appCard border border-appBorder text-white px-4 py-2 rounded hover:bg-white/5 transition">Close Summary</button></div></div> )}
 
           {showForm && importStatus === 'idle' && (
@@ -643,7 +740,7 @@ const firebaseConfig = {
                             <span class={`text-[10px] px-1 rounded ${t.status === 'Open' ? 'bg-yellow-500/10 text-yellow-500' : 'bg-gray-500/10 text-gray-400'}`}>{t.status}</span>
                           </div>
                           {t.status === 'Closed' && (
-                            <button onClick={() => setAnalyzerTrade(t)} class="text-xl hover:scale-110 transition-transform" title="Hindsight Analyzer">📈</button>
+                            <button onClick={() => setAnalyzerTrade(t)} class="text-xl hover:scale-110 transition-transform" title="Open Hindsight Analyzer">📈</button>
                           )}
                         </td>
                         <td class="p-2 text-gray-300 font-medium">{getTraderName(t.traderId)}</td>
@@ -652,10 +749,8 @@ const firebaseConfig = {
                         <td class="p-2 text-gray-300"><div><span class="text-gray-500 text-[10px]">B:</span> {formatPrice(t.buyPrice)}</div><div><span class="text-gray-500 text-[10px]">S:</span> {t.status === 'Closed' ? formatPrice(t.sellPrice) : '-'}</div></td>
                         <td class="p-2 border-l border-appBorder bg-white/5 text-gray-300">{formatMoney(invested)}</td>
                         
-                        {/* STATIC VALUES ONLY - NO LIVE CALCS HERE */}
                         <td class={`p-2 border-l border-appBorder bg-white/5 font-bold ${t.status === 'Open' ? 'text-gray-500' : (t.actualPnL >= 0 ? 'text-appGreen' : 'text-appRed')}`}>{t.status === 'Closed' ? formatMoney(t.actualPnL) : '-'}</td>
                         <td class={`p-2 font-bold ${t.status === 'Open' ? 'text-gray-500' : (ig >= 0 ? 'text-appGreen' : 'text-appRed')}`}>{t.status === 'Closed' ? formatMoney(ig) : '-'}</td>
-                        
                         <td class={`p-2 font-bold ${t.status === 'Open' ? 'text-gray-500' : (t.pat >= 0 ? 'text-appGreen' : 'text-appRed')}`}>{t.status === 'Closed' ? formatMoney(t.pat) : '-'}</td>
                         <td class="p-2 border-l border-appBorder bg-white/5 font-semibold text-appAccent">{t.status === 'Closed' ? formatMoney(netReturn) : '-'}</td>
                         
@@ -686,6 +781,30 @@ const firebaseConfig = {
             </div>
           )}
           {activeDropdown && <div class="fixed inset-0 z-40" onClick={() => setActiveDropdown(null)}></div>}
+        </div>
+      );
+    }
+
+    function DashboardCharts({ trades, traders }) {
+      const pnlChartRef = useRef(null); const typeChartRef = useRef(null);
+      useEffect(() => {
+        Chart.defaults.color = '#9CA3AF'; Chart.defaults.borderColor = '#2A364F';
+        const closedTrades = trades.filter(t => t.status === 'Closed').sort((a, b) => new Date(a.sellDate) - new Date(b.sellDate));
+        const pnlLabels = closedTrades.map(t => t.symbol); 
+        const pnlData = closedTrades.map(t => (t.actualPnL || 0) + (t.intradayGains || 0)); 
+        const pnlColors = pnlData.map(val => val >= 0 ? '#10B981' : '#EF4444'); 
+        let intradayCount = 0; let deliveryCount = 0; closedTrades.forEach(t => { if (t.isIntraday) intradayCount++; else deliveryCount++; });
+
+        const pnlChart = new Chart(pnlChartRef.current, { type: 'bar', data: { labels: pnlLabels, datasets: [{ data: pnlData, backgroundColor: pnlColors, borderRadius: 4 }] }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } } });
+        const typeChart = new Chart(typeChartRef.current, { type: 'doughnut', data: { labels: ['Intraday', 'Delivery'], datasets: [{ data: [intradayCount, deliveryCount], backgroundColor: ['#38BDF8', '#6366F1'], borderWidth: 0 }] }, options: { responsive: true, maintainAspectRatio: false, cutout: '70%' } });
+
+        return () => { pnlChart.destroy(); typeChart.destroy(); };
+      }, [trades, traders]);
+
+      return (
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mt-8 animate-fade-in">
+          <div class="bg-appNavy border border-appBorder rounded-xl p-5 lg:col-span-2 h-72 flex flex-col"><h3 class="text-white font-medium mb-4">Trade P&L History</h3><div class="relative flex-1 min-h-0"><canvas ref={pnlChartRef}></canvas></div></div>
+          <div class="bg-appNavy border border-appBorder rounded-xl p-5 h-72 flex flex-col lg:col-span-1"><h3 class="text-white font-medium mb-2">Intraday vs Delivery</h3><div class="relative flex-1 min-h-0"><canvas ref={typeChartRef}></canvas></div></div>
         </div>
       );
     }
@@ -794,7 +913,7 @@ const firebaseConfig = {
       
       const getButtonClass = (viewName) => `px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${currentView === viewName ? 'bg-appAccent/10 text-appAccent' : 'text-gray-400 hover:text-gray-200 hover:bg-gray-800/50'}`;
 
-      if (!db) return <div class="flex items-center justify-center h-screen bg-appNavy text-gray-400">Loading Cloud Database or Missing Config... Check line 45!</div>;
+      if (!db) return <div class="flex items-center justify-center h-screen bg-appNavy text-gray-400">Loading Cloud Database...</div>;
 
       return (
         <div class="min-h-screen flex flex-col">
@@ -864,9 +983,10 @@ const firebaseConfig = {
                     </div>
                   </div>
 
-                  {/* NEW: LIVE OPEN TRADES TRACKER ON DASHBOARD */}
+                  {/* LIVE OPEN TRADES TRACKER ON DASHBOARD */}
                   <LiveOpenTradesTracker trades={trades} traders={traders} />
 
+                  <DashboardCharts trades={trades} traders={traders} />
                 </div>
               )}
               
