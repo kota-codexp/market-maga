@@ -39,7 +39,7 @@
     const { useState, useEffect, useRef } = React;
 
     // =====================================================================
-    // 🔥 LIVE API CONFIGURATIONS 🔥
+    // 🔥 LIVE FIREBASE CONFIGURATION 🔥
     // =====================================================================
     const firebaseConfig = {
       apiKey: "AIzaSyA4we5Feq5u0CtR4_JuHlb03cxLAZao4Jg",
@@ -90,7 +90,7 @@
       return dStr; 
     };
 
-    // --- ENHANCED HINDSIGHT ANALYZER (WITH YAHOO FINANCE LIVE API) ---
+    // --- ENHANCED HINDSIGHT ANALYZER (STATIC MATH MODE) ---
     function HindsightAnalyzer({ trade, onClose }) {
       const chartRef = useRef(null);
       const chartInstance = useRef(null);
@@ -121,8 +121,7 @@
         const endD = new Date(sellD); endD.setDate(endD.getDate() + 30);
         const endStr = formatDateStr(endD);
 
-        // Core Drawing Engine
-        const drawChart = (labels, prices, idealMinPrice, idealMaxPrice, apiMessage, isError) => {
+        const drawChart = (labels, prices, idealMinPrice, idealMaxPrice) => {
           const pointRadii = new Array(labels.length).fill(0);
           const pointBackgroundColors = new Array(labels.length).fill('transparent');
           const pointBorderColors = new Array(labels.length).fill('transparent');
@@ -142,11 +141,11 @@
 
           if(buyIdx !== -1) {
             pointRadii[buyIdx] = 8; pointBackgroundColors[buyIdx] = '#10B981'; pointBorderColors[buyIdx] = '#ffffff';
-            if(isError) prices[buyIdx] = trade.buyPrice; 
+            prices[buyIdx] = trade.buyPrice; 
           }
           if(sellIdx !== -1) {
             pointRadii[sellIdx] = 8; pointBackgroundColors[sellIdx] = '#EF4444'; pointBorderColors[sellIdx] = '#ffffff';
-            if(isError) prices[sellIdx] = trade.sellPrice;
+            prices[sellIdx] = trade.sellPrice;
           }
 
           const idealGain = idealMaxPrice - idealMinPrice;
@@ -221,72 +220,22 @@
           document.getElementById('ha-actual-gain').innerText = `${actualPercentage}%`;
           document.getElementById('ha-efficiency').innerText = `${captureEfficiency}%`;
           document.getElementById('ha-efficiency-bar').style.width = `${Math.max(0, Math.min(100, captureEfficiency))}%`;
-          
-          const statusEl = document.getElementById('ha-api-status');
-          statusEl.innerText = apiMessage;
-          statusEl.className = `absolute top-2 right-4 text-[10px] px-2 py-1 rounded ${isError ? 'text-yellow-500 bg-yellow-500/10 border border-yellow-500/20' : 'text-appGreen bg-appGreen/10 border border-appGreen/20'}`;
         };
 
-        const buildSimulation = (errorMsg) => {
-          const totalDays = Math.max(1, Math.round((endD - startD) / (1000 * 60 * 60 * 24)));
-          const labels = []; const prices = [];
-          let currentPrice = trade.buyPrice * 0.94;
-          let idealMinPrice = currentPrice; let idealMaxPrice = currentPrice;
-          
-          for (let i = 0; i <= totalDays; i++) {
-            const d = new Date(startD); d.setDate(d.getDate() + i);
-            labels.push(formatDateStr(d));
-            currentPrice = currentPrice + ((Math.random() - 0.48) * (trade.buyPrice * 0.025));
-            prices.push(parseFloat(currentPrice.toFixed(2)));
-            if (currentPrice < idealMinPrice) idealMinPrice = currentPrice;
-            if (currentPrice > idealMaxPrice) idealMaxPrice = currentPrice;
-          }
-          drawChart(labels, prices, idealMinPrice, idealMaxPrice, errorMsg || "Simulating Data", true);
-        };
-
-        // Fetch historical data securely from Yahoo Finance via Proxy
-        const fetchHistorical = async () => {
-          const startUnix = Math.floor(startD.getTime() / 1000);
-          const endUnix = Math.floor(endD.getTime() / 1000);
-          
-          const yfUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${trade.symbol}.NS?period1=${startUnix}&period2=${endUnix}&interval=1d`;
-          const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(yfUrl)}`;
-          
-          try {
-            const res = await fetch(proxyUrl);
-            const data = await res.json();
-            const parsed = JSON.parse(data.contents);
-            
-            if (parsed.chart && parsed.chart.result && parsed.chart.result.length > 0) {
-              const result = parsed.chart.result[0];
-              const timestamps = result.timestamp;
-              const closes = result.indicators.quote[0].close;
-              
-              if (!timestamps || !closes || timestamps.length < 5) return buildSimulation("Not enough historical data");
-              
-              const labels = []; const prices = [];
-              let idealMinPrice = 9999999; let idealMaxPrice = -9999999;
-
-              timestamps.forEach((ts, idx) => {
-                const price = parseFloat(closes[idx]);
-                if (!isNaN(price)) {
-                    const d = new Date(ts * 1000);
-                    labels.push(formatDateStr(d));
-                    prices.push(price);
-                    if (price < idealMinPrice) idealMinPrice = price;
-                    if (price > idealMaxPrice) idealMaxPrice = price;
-                }
-              });
-              drawChart(labels, prices, idealMinPrice, idealMaxPrice, "✅ Live NSE Historical Data", false);
-            } else {
-              buildSimulation("Invalid Data Format");
-            }
-          } catch (e) {
-            buildSimulation("Network Error Fetching Data");
-          }
-        };
-
-        fetchHistorical();
+        const totalDays = Math.max(1, Math.round((endD - startD) / (1000 * 60 * 60 * 24)));
+        const labels = []; const prices = [];
+        let currentPrice = trade.buyPrice * 0.94;
+        let idealMinPrice = currentPrice; let idealMaxPrice = currentPrice;
+        
+        for (let i = 0; i <= totalDays; i++) {
+          const d = new Date(startD); d.setDate(d.getDate() + i);
+          labels.push(formatDateStr(d));
+          currentPrice = currentPrice + ((Math.random() - 0.48) * (trade.buyPrice * 0.025));
+          prices.push(parseFloat(currentPrice.toFixed(2)));
+          if (currentPrice < idealMinPrice) idealMinPrice = currentPrice;
+          if (currentPrice > idealMaxPrice) idealMaxPrice = currentPrice;
+        }
+        drawChart(labels, prices, idealMinPrice, idealMaxPrice);
 
         return () => { if (chartInstance.current) chartInstance.current.destroy(); };
       }, [trade]);
@@ -331,7 +280,7 @@
               </div>
 
               <div class="bg-appNavy border border-appBorder rounded-xl p-4 h-72 relative">
-                <div id="ha-api-status"></div>
+                <div class="absolute top-2 right-4 text-[10px] text-gray-400 bg-white/5 border border-gray-600 px-2 py-1 rounded">Math Simulation Engine</div>
                 <canvas ref={chartRef}></canvas>
               </div>
 
@@ -361,8 +310,8 @@
       );
     }
 
-    // --- DASHBOARD: LIVE OPEN TRADES TRACKER ---
-    function LiveOpenTradesTracker({ trades, traders, livePrices, apiStatusMsg }) {
+    // --- DASHBOARD: STATIC OPEN TRADES TRACKER ---
+    function LiveOpenTradesTracker({ trades, traders }) {
       const openTrades = trades.filter(t => t.status === 'Open');
       if (openTrades.length === 0) return null;
 
@@ -372,11 +321,11 @@
         <div class="bg-appNavy border border-appBorder rounded-xl overflow-hidden mb-8 shadow-lg">
           <div class="p-4 bg-appCard border-b border-appBorder flex justify-between items-center">
             <h3 class="text-white font-medium flex items-center">
-              <span class="w-2 h-2 rounded-full bg-appGreen mr-2 animate-pulse"></span>
+              <span class="w-2 h-2 rounded-full bg-yellow-500 mr-2"></span>
               Live Open Trades Tracker
             </h3>
-            <span class={`text-xs border px-2 py-0.5 rounded ${apiStatusMsg.includes('✅') ? 'text-appGreen border-appGreen/30 bg-appGreen/10' : 'text-yellow-500 border-yellow-500/30 bg-yellow-500/10'}`}>
-              {apiStatusMsg}
+            <span class="text-xs text-gray-400 border border-gray-600 px-2 py-0.5 rounded">
+              Live Updates Paused
             </span>
           </div>
           <div class="overflow-x-auto">
@@ -393,24 +342,17 @@
                 </tr>
               </thead>
               <tbody class="divide-y divide-appBorder">
-                {openTrades.map(t => {
-                  const liveP = livePrices[t.symbol] || t.buyPrice; 
-                  const livePnL = (liveP - t.buyPrice) * t.qty;
-                  
-                  return (
-                    <tr key={t.id} class="hover:bg-white/5 transition">
-                      <td class="px-5 py-3 font-bold text-white">{t.symbol}</td>
-                      <td class="px-5 py-3 text-gray-300">{getTraderName(t.traderId)}</td>
-                      <td class="px-5 py-3 text-gray-400">{t.buyDate}</td>
-                      <td class="px-5 py-3 text-gray-300">{t.qty}</td>
-                      <td class="px-5 py-3 text-gray-300">{formatPrice(t.buyPrice)}</td>
-                      <td class="px-5 py-3 font-bold text-appAccent">{formatPrice(liveP)}</td>
-                      <td class={`px-5 py-3 font-bold border-l border-appBorder bg-white/5 ${livePnL >= 0 ? 'text-appGreen' : 'text-appRed'}`}>
-                        {formatMoney(livePnL)}
-                      </td>
-                    </tr>
-                  );
-                })}
+                {openTrades.map(t => (
+                  <tr key={t.id} class="hover:bg-white/5 transition">
+                    <td class="px-5 py-3 font-bold text-white">{t.symbol}</td>
+                    <td class="px-5 py-3 text-gray-300">{getTraderName(t.traderId)}</td>
+                    <td class="px-5 py-3 text-gray-400">{t.buyDate}</td>
+                    <td class="px-5 py-3 text-gray-300">{t.qty}</td>
+                    <td class="px-5 py-3 text-gray-300">{formatPrice(t.buyPrice)}</td>
+                    <td class="px-5 py-3 font-bold text-appAccent">{formatPrice(t.buyPrice)}</td>
+                    <td class="px-5 py-3 font-bold border-l border-appBorder bg-white/5 text-gray-500">-</td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>
@@ -579,6 +521,151 @@
               <table class="w-full text-left text-xs whitespace-nowrap">
                 <thead class="bg-appCard border-b border-appBorder text-gray-400 uppercase">
                   <tr>
+                    {isAdmin && <th class="px-4 py-3 w-10"><input type="checkbox" class="accent-appAccent cursor-pointer" checked={cashLedger.length > 0 && selectedLedgerIds.length === cashLedger.length} onChange={handleSelectAll} /></th>}
+                    <th class="px-4 py-3">Date</th><th class="px-4 py-3 text-right">Amount</th><th class="px-4 py-3">From</th><th class="px-4 py-3">To</th><th class="px-4 py-3">Purpose</th><th class="px-4 py-3">Details</th>
+                    {isAdmin && <th class="px-4 py-3 text-center">Action</th>}
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-appBorder">
+                  {cashLedger.map((entry) => (
+                    <tr key={entry.id} class="hover:bg-white/5 transition">
+                      {isAdmin && <td class="px-4 py-3"><input type="checkbox" class="accent-appAccent cursor-pointer" checked={selectedLedgerIds.includes(entry.id)} onChange={(e) => { if (e.target.checked) setSelectedLedgerIds([...selectedLedgerIds, entry.id]); else setSelectedLedgerIds(selectedLedgerIds.filter(id => id !== entry.id)); }} /></td>}
+                      <td class="px-4 py-3 text-gray-300">{entry.date}</td><td class="px-4 py-3 text-right text-white font-medium">{formatMoney(entry.amount)}</td><td class="px-4 py-3"><span class="bg-appCard border border-appBorder px-2 py-1 rounded text-gray-300">{getTraderName(entry.fromMemberId)}</span></td><td class="px-4 py-3"><span class="bg-appCard border border-appBorder px-2 py-1 rounded text-gray-300">{getTraderName(entry.toMemberId)}</span></td><td class="px-4 py-3"><span class={`px-2 py-1 rounded text-xs ${entry.purpose === 'New Investment' ? 'bg-appGreen/10 text-appGreen' : entry.purpose === 'Withdrawal' ? 'bg-appRed/10 text-appRed' : 'bg-appAccent/10 text-appAccent'}`}>{entry.purpose}</span></td><td class="px-4 py-3 text-gray-400 text-xs">{entry.linkedTradeIds && entry.linkedTradeIds.length > 0 && (<span class="text-appAccent block mb-1 font-medium">Trades: {entry.linkedTradeIds.map(id => trades.find(t => t.id === id)?.symbol).join(', ')}</span>)}{entry.comments && <span class="block">{entry.comments}</span>}</td>
+                      {isAdmin && (
+                        <td class="px-4 py-3 relative text-center">
+                          <button onClick={() => setActiveDropdown(activeDropdown === entry.id ? null : entry.id)} class="text-gray-400 hover:text-white px-2 rounded hover:bg-white/10 font-bold">⋮</button>
+                          {activeDropdown === entry.id && (
+                            <div class="absolute right-6 top-8 w-24 bg-appCard border border-appBorder shadow-xl rounded z-50 overflow-hidden text-left">
+                              <button onClick={() => handleEdit(entry)} class="block w-full px-4 py-2 hover:bg-white/5 text-appAccent text-xs">Edit</button>
+                              <button onClick={() => handleDelete(entry)} class="block w-full px-4 py-2 hover:bg-white/5 text-appRed text-xs">Delete</button>
+                            </div>
+                          )}
+                        </td>
+                      )}
+                    </tr>
+                  ))}
+                  {cashLedger.length === 0 && <tr><td colSpan={isAdmin ? 8 : 6} class="px-4 py-8 text-center text-gray-500">No ledger entries yet.</td></tr>}
+                </tbody>
+              </table>
+            </div>
+          )}
+          {activeDropdown && <div class="fixed inset-0 z-40" onClick={() => setActiveDropdown(null)}></div>}
+        </div>
+      );
+    }
+
+    function TradeLogView({ trades, setTrades, traders, setTraders, cashLedger, setCashLedger, isAdmin }) {
+      const [showForm, setShowForm] = useState(false); const [editingTradeId, setEditingTradeId] = useState(null); const [filterTrader, setFilterTrader] = useState('All'); const [filterStatus, setFilterStatus] = useState('All'); const [selectedTradeIds, setSelectedTradeIds] = useState([]); 
+      const [activeDropdown, setActiveDropdown] = useState(null);
+      const [analyzerTrade, setAnalyzerTrade] = useState(null);
+
+      const emptyForm = { symbol: '', traderId: traders[0]?.id || '', buyDate: '', sellDate: '', qty: '', buyPrice: '', sellPrice: '', isIntraday: 'false', actualPnL: '', intradayGains: '', pat: '', notes: '', capitalInjected: '', linkedLedgerEntryId: null };
+      const [formData, setFormData] = useState(emptyForm);
+      
+      const handleChange = (e) => { 
+        const { name, value } = e.target; 
+        let newFormData = { ...formData, [name]: value }; 
+        if (name === 'actualPnL' || name === 'intradayGains') { 
+          const pnl = name === 'actualPnL' ? parseFloat(value) || 0 : parseFloat(formData.actualPnL) || 0;
+          const ig = name === 'intradayGains' ? parseFloat(value) || 0 : parseFloat(formData.intradayGains) || 0;
+          const totalPreTax = pnl + ig;
+          if (totalPreTax > 0) { newFormData.pat = (totalPreTax * 0.8).toFixed(2); } else { newFormData.pat = totalPreTax.toFixed(2); } 
+        } 
+        setFormData(newFormData); 
+      };
+
+      const handleEdit = (trade) => { const linkedLedger = trade.linkedLedgerEntryId ? cashLedger.find(l => l.id === trade.linkedLedgerEntryId) : null; setFormData({ symbol: trade.symbol, traderId: trade.traderId, buyDate: cleanDateForInput(trade.buyDate), sellDate: cleanDateForInput(trade.sellDate) || '', qty: trade.qty, buyPrice: trade.buyPrice, sellPrice: trade.sellPrice || '', isIntraday: trade.isIntraday ? 'true' : 'false', actualPnL: trade.actualPnL || '', intradayGains: trade.intradayGains || '', pat: trade.pat || '', notes: trade.notes || '', capitalInjected: linkedLedger ? linkedLedger.amount : '', linkedLedgerEntryId: trade.linkedLedgerEntryId || null }); setEditingTradeId(trade.id); setShowForm(true); setActiveDropdown(null); };
+      const handleDeleteTrade = (tradeToDelete) => { if(window.confirm(`Delete trade for ${tradeToDelete.symbol}?`)) { if (tradeToDelete.linkedLedgerEntryId) setCashLedger(cashLedger.filter(l => l.id !== tradeToDelete.linkedLedgerEntryId)); setTrades(trades.filter(t => t.id !== tradeToDelete.id)); setSelectedTradeIds(selectedTradeIds.filter(id => id !== tradeToDelete.id)); } setActiveDropdown(null); };
+      const handleBulkDelete = () => { if(window.confirm(`Delete ${selectedTradeIds.length} trades?`)) { const tradesToDelete = trades.filter(t => selectedTradeIds.includes(t.id)); const ledgerIdsToDelete = tradesToDelete.map(t => t.linkedLedgerEntryId).filter(id => id !== null); if (ledgerIdsToDelete.length > 0) setCashLedger(cashLedger.filter(l => !ledgerIdsToDelete.includes(l.id))); setTrades(trades.filter(t => !selectedTradeIds.includes(t.id))); setSelectedTradeIds([]); } };
+      
+      const handleSubmit = (e) => { 
+        e.preventDefault(); 
+        const isClosed = formData.sellDate !== '' && formData.sellPrice !== ''; 
+        const injectedAmt = parseFloat(formData.capitalInjected || 0); 
+        let newLedgerId = formData.linkedLedgerEntryId; let updatedLedger = [...cashLedger]; 
+        if (editingTradeId) { if (injectedAmt > 0) { if (newLedgerId && updatedLedger.some(l => l.id === newLedgerId)) updatedLedger = updatedLedger.map(l => l.id === newLedgerId ? { ...l, amount: injectedAmt, date: formData.buyDate, fromMemberId: parseInt(formData.traderId), toMemberId: parseInt(formData.traderId) } : l); else { newLedgerId = Date.now() + 999; updatedLedger.push({ id: newLedgerId, date: formData.buyDate, amount: injectedAmt, fromMemberId: parseInt(formData.traderId), toMemberId: parseInt(formData.traderId), purpose: 'New Investment', comments: `Auto-added from Trade Edit (${formData.symbol.toUpperCase()})`, linkedTradeIds: [] }); } } else { if (newLedgerId) { updatedLedger = updatedLedger.filter(l => l.id !== newLedgerId); newLedgerId = null; } } } else { if (injectedAmt > 0) { newLedgerId = Date.now() + 999; updatedLedger.push({ id: newLedgerId, date: formData.buyDate, amount: injectedAmt, fromMemberId: parseInt(formData.traderId), toMemberId: parseInt(formData.traderId), purpose: 'New Investment', comments: `Auto-added from Trade Log (${formData.symbol.toUpperCase()})`, linkedTradeIds: [] }); } } setCashLedger(updatedLedger.sort((a, b) => new Date(b.date) - new Date(a.date))); 
+        
+        const newTrade = { 
+          id: editingTradeId || Date.now(), symbol: formData.symbol.toUpperCase(), traderId: parseInt(formData.traderId), 
+          buyDate: formData.buyDate, sellDate: isClosed ? formData.sellDate : null, qty: parseFloat(formData.qty), 
+          buyPrice: parseFloat(formData.buyPrice), sellPrice: isClosed ? parseFloat(formData.sellPrice) : null, 
+          isIntraday: formData.isIntraday === 'true', actualPnL: isClosed ? parseFloat(formData.actualPnL || 0) : 0, 
+          intradayGains: isClosed ? parseFloat(formData.intradayGains || 0) : 0, pat: isClosed ? parseFloat(formData.pat || 0) : 0, 
+          notes: formData.notes, status: isClosed ? 'Closed' : 'Open', linkedLedgerEntryId: newLedgerId 
+        }; 
+        if (editingTradeId) setTrades(trades.map(t => t.id === editingTradeId ? newTrade : t)); else setTrades([...trades, newTrade]); setFormData(emptyForm); setShowForm(false); setEditingTradeId(null); 
+      };
+
+      const fileInputRef = useRef(null); const [importStatus, setImportStatus] = useState('idle'); const [csvHeaders, setCsvHeaders] = useState([]); const [csvRawData, setCsvRawData] = useState([]); const [columnMap, setColumnMap] = useState({}); const [unknownTraders, setUnknownTraders] = useState([]); const [traderMap, setTraderMap] = useState({}); const [importSummary, setImportSummary] = useState(null);
+      const expectedFields = [{ key: 'symbol', label: 'Symbol / Stock', required: true, match: ['symbol', 'stock'] }, { key: 'traderName', label: 'Trader Name', required: true, match: ['trader', 'member'] }, { key: 'buyDate', label: 'Buy Date', required: true, match: ['buy date', 'date'] }, { key: 'qty', label: 'Quantity', required: true, match: ['qty', 'quantity'] }, { key: 'buyPrice', label: 'Buy Price', required: true, match: ['buy price', 'entry'] }, { key: 'sellDate', label: 'Sell Date', required: false, match: ['sell date', 'exit date'] }, { key: 'sellPrice', label: 'Sell Price', required: false, match: ['sell price', 'exit price'] }, { key: 'isIntraday', label: 'Intraday?', required: false, match: ['intraday'] }, { key: 'actualPnL', label: 'Pre-Tax Return', required: false, match: ['actual pnl', 'pnl', 'pre-tax'] }, { key: 'intradayGains', label: 'Intraday Gains', required: false, match: ['intra gain', 'intraday gain'] }, { key: 'pat', label: 'Post-Tax (PAT)', required: false, match: ['pat', 'post-tax'] }, { key: 'notes', label: 'Notes', required: false, match: ['notes', 'comments'] }];
+      const handleFileUpload = (e) => { const file = e.target.files[0]; if (!file) return; Papa.parse(file, { header: true, skipEmptyLines: true, complete: (results) => { setCsvHeaders(results.meta.fields); setCsvRawData(results.data); const initialMap = {}; expectedFields.forEach(field => { const matchedHeader = results.meta.fields.find(h => field.match.some(alias => h.toLowerCase().includes(alias))); if (matchedHeader) initialMap[field.key] = matchedHeader; }); setColumnMap(initialMap); detectUnknownTraders(initialMap.traderName, results.data); setImportStatus('mapping'); } }); e.target.value = ''; };
+      const detectUnknownTraders = (traderColName, data) => { if (!traderColName) { setUnknownTraders([]); return; } const uniqueNamesInCSV = [...new Set(data.map(row => (row[traderColName] || '').trim()).filter(n => n !== ''))]; const existingNamesUpper = traders.map(t => t.name.toUpperCase()); const missing = uniqueNamesInCSV.filter(name => !existingNamesUpper.includes(name.toUpperCase())); setUnknownTraders(missing); const initialTraderMap = {}; missing.forEach(m => initialTraderMap[m] = 'NEW'); setTraderMap(initialTraderMap); };
+      const handleColumnMapChange = (fieldKey, selectedHeader) => { const newMap = { ...columnMap, [fieldKey]: selectedHeader }; setColumnMap(newMap); if (fieldKey === 'traderName') detectUnknownTraders(selectedHeader, csvRawData); };
+      const executeImport = () => { let successfulTrades = []; let failedRows = []; let newlyAddedTraders = [...traders]; const parseNum = (val) => { if (!val) return null; const num = parseFloat(String(val).replace(/[^0-9.-]+/g,"")); return isNaN(num) ? null : num; }; csvRawData.forEach((row, index) => { const sym = row[columnMap.symbol]; const bDate = cleanDateForInput(row[columnMap.buyDate]); const bPrice = parseNum(row[columnMap.buyPrice]); const qty = parseNum(row[columnMap.qty]); const traderNameString = (row[columnMap.traderName] || '').trim(); if (!sym || !bDate || bPrice === null || qty === null || !traderNameString) { failedRows.push(`Row ${index + 2}: Missing mandatory fields`); return; } let finalTraderId = null; const existingMatch = newlyAddedTraders.find(t => t.name.toUpperCase() === traderNameString.toUpperCase()); if (existingMatch) { finalTraderId = existingMatch.id; } else { const decision = traderMap[traderNameString]; if (decision === 'NEW') { const newTrader = { id: Date.now() + Math.random(), name: traderNameString }; newlyAddedTraders.push(newTrader); finalTraderId = newTrader.id; } else { finalTraderId = parseInt(decision); } } const sDate = cleanDateForInput(row[columnMap.sellDate]) || null; const sPrice = parseNum(row[columnMap.sellPrice]); const isClosed = sDate && sPrice !== null; const rawIntraday = (row[columnMap.isIntraday] || '').toLowerCase(); const isIntraday = ['yes', 'true', '1', 'y'].includes(rawIntraday); let importedActual = parseNum(row[columnMap.actualPnL]) || 0; let importedIntra = parseNum(row[columnMap.intradayGains]) || 0; let importedPat = parseNum(row[columnMap.pat]); if (importedPat === null && isClosed) { let preTax = importedActual + importedIntra; importedPat = preTax > 0 ? preTax * 0.8 : preTax; } const trade = { id: Date.now() + Math.random(), symbol: sym.toUpperCase(), traderId: finalTraderId, buyDate: bDate, sellDate: isClosed ? sDate : null, qty: qty, buyPrice: bPrice, sellPrice: isClosed ? sPrice : null, isIntraday: isIntraday, actualPnL: isClosed ? importedActual : 0, intradayGains: isClosed ? importedIntra : 0, pat: isClosed ? (importedPat || 0) : 0, notes: row[columnMap.notes] || '', status: isClosed ? 'Closed' : 'Open', linkedLedgerEntryId: null }; successfulTrades.push(trade); }); setTraders(newlyAddedTraders); setTrades([...trades, ...successfulTrades]); setImportSummary({ successCount: successfulTrades.length, fails: failedRows }); setImportStatus('summary'); };
+
+      const filteredTrades = trades.filter(t => (filterTrader === 'All' || t.traderId === parseInt(filterTrader)) && (filterStatus === 'All' || t.status === filterStatus));
+      const totalActualPnL = filteredTrades.reduce((sum, t) => sum + (t.actualPnL || 0) + (t.intradayGains || 0), 0); 
+      const totalPAT = filteredTrades.reduce((sum, t) => sum + (t.pat || 0), 0);
+      const getDaysHeld = (t) => { if (t.status === 'Open') return 'Open'; const days = Math.floor((new Date(t.sellDate) - new Date(t.buyDate)) / (1000 * 60 * 60 * 24)); return days === 0 ? 'Same Day' : `${days}`; };
+      const getTraderName = (id) => traders.find(tr => tr.id === id)?.name || 'Unknown';
+      const handleSelectAll = (e) => { if (e.target.checked) setSelectedTradeIds(filteredTrades.map(t => t.id)); else setSelectedTradeIds([]); };
+
+      return (
+        <div class="animate-fade-in">
+          <HindsightAnalyzer trade={analyzerTrade} onClose={() => setAnalyzerTrade(null)} />
+
+          <div class="flex justify-between items-center mb-6">
+            <h1 class="text-2xl font-semibold text-white">Trade Log</h1>
+            {isAdmin && (
+              <div class="space-x-3 flex items-center">
+                {selectedTradeIds.length > 0 && <button onClick={handleBulkDelete} class="bg-appRed text-white font-semibold px-4 py-2 rounded-lg hover:bg-red-500 transition animate-fade-in">Delete Selected ({selectedTradeIds.length})</button>}
+                <input type="file" accept=".csv" ref={fileInputRef} onChange={handleFileUpload} class="hidden" />
+                <button onClick={() => fileInputRef.current.click()} class="bg-appCard border border-appBorder text-white font-semibold px-4 py-2 rounded-lg hover:bg-white/5 transition">↑ Upload CSV</button>
+                <button onClick={() => { setFormData(emptyForm); setEditingTradeId(null); setShowForm(!showForm); setImportStatus('idle'); }} class="bg-appAccent text-appNavy font-semibold px-4 py-2 rounded-lg hover:bg-sky-400 transition">{showForm ? 'Cancel' : '+ Add New Trade'}</button>
+              </div>
+            )}
+          </div>
+
+          {importStatus === 'mapping' && ( <div class="bg-appNavy border border-appBorder rounded-xl p-6 mb-8 shadow-inner animate-fade-in"><h2 class="text-xl text-white mb-2">Map CSV Columns</h2><div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">{expectedFields.map(field => (<div key={field.key} class="bg-appCard p-4 rounded-lg border border-appBorder"><label class="block text-sm text-white mb-2">{field.label}</label><select value={columnMap[field.key] || ''} onChange={(e) => handleColumnMapChange(field.key, e.target.value)} class="w-full bg-appNavy border border-appBorder text-white rounded px-3 py-2 text-sm focus:border-appAccent outline-none"><option value="" class="italic text-gray-500">-- Not in this file --</option>{csvHeaders.map(header => <option key={header} value={header}>{header}</option>)}</select></div>))}</div><div class="flex justify-between border-t border-appBorder pt-4"><button onClick={() => setImportStatus('idle')} class="text-gray-400 hover:text-white transition">Cancel Import</button><button onClick={executeImport} class="bg-appGreen text-appNavy font-bold px-6 py-2 rounded-lg hover:bg-green-400 transition">Confirm & Import Data</button></div></div> )}
+          {importStatus === 'summary' && importSummary && ( <div class="bg-appNavy border border-appBorder rounded-xl p-6 mb-8 shadow-inner animate-fade-in"><h2 class="text-xl text-white mb-4">Import Complete!</h2><p class="text-appGreen text-lg mb-4">✅ Successfully imported <b>{importSummary.successCount}</b> trades.</p><button onClick={() => setImportStatus('idle')} class="bg-appCard text-white px-4 py-2 rounded">Close</button></div> )}
+
+          {showForm && importStatus === 'idle' && (
+            <div class="bg-appNavy border border-appBorder rounded-xl p-6 mb-8 shadow-inner animate-fade-in">
+              <form onSubmit={handleSubmit}>
+                <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
+                  <div><label class="block text-xs text-gray-400 mb-1">Symbol/Stock</label><input required name="symbol" value={formData.symbol} onChange={handleChange} type="text" class="w-full bg-appCard border border-appBorder text-white rounded px-3 py-2 text-sm outline-none uppercase" /></div>
+                  <div><label class="block text-xs text-gray-400 mb-1">Trader</label><select required name="traderId" value={formData.traderId} onChange={handleChange} class="w-full bg-appCard border border-appBorder text-white rounded px-3 py-2 text-sm outline-none">{traders.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}</select></div>
+                  <div><label class="block text-xs text-gray-400 mb-1">Intraday?</label><select name="isIntraday" value={formData.isIntraday} onChange={handleChange} class="w-full bg-appCard border border-appBorder text-white rounded px-3 py-2 text-sm outline-none"><option value="false">No</option><option value="true">Yes</option></select></div>
+                  <div><label class="block text-xs text-gray-400 mb-1">Quantity</label><input required name="qty" value={formData.qty} onChange={handleChange} type="number" step="any" class="w-full bg-appCard border border-appBorder text-white rounded px-3 py-2 text-sm outline-none" /></div>
+                  <div><label class="block text-xs text-gray-400 mb-1">Buy Date</label><input required name="buyDate" value={formData.buyDate} onChange={handleChange} type="date" class="w-full bg-appCard border border-appBorder text-gray-300 rounded px-3 py-2 text-sm outline-none" /></div>
+                  <div><label class="block text-xs text-gray-400 mb-1">Buy Price (₹)</label><input required name="buyPrice" value={formData.buyPrice} onChange={handleChange} type="number" step="any" class="w-full bg-appCard border border-appBorder text-white rounded px-3 py-2 text-sm outline-none" /></div>
+                  <div><label class="block text-xs text-gray-400 mb-1">Sell Date</label><input name="sellDate" value={formData.sellDate} onChange={handleChange} type="date" class="w-full bg-appCard border border-appBorder text-gray-300 rounded px-3 py-2 text-sm outline-none" /></div>
+                  <div><label class="block text-xs text-gray-400 mb-1">Sell Price</label><input name="sellPrice" value={formData.sellPrice} onChange={handleChange} type="number" step="any" class="w-full bg-appCard border border-appBorder text-white rounded px-3 py-2 text-sm outline-none" /></div>
+                </div>
+                <div class="bg-appAccent/10 border border-appAccent/30 rounded-lg p-4 mb-4">
+                  <div class="md:w-1/3"><label class="block text-xs font-semibold text-appAccent mb-1">New Capital Added? (₹)</label><input name="capitalInjected" value={formData.capitalInjected} onChange={handleChange} type="number" step="any" class="w-full bg-appCard border border-appAccent text-white rounded px-3 py-2 text-sm outline-none" /></div>
+                </div>
+                <div class="border-t border-appBorder pt-4 mb-4 grid grid-cols-1 md:grid-cols-4 gap-4">
+                  <div class="md:col-span-4"><p class="text-xs text-appAccent">Manual Tax & Profit Entry</p></div>
+                  <div><label class="block text-xs text-gray-400 mb-1">Actual P&L (₹)</label><input name="actualPnL" value={formData.actualPnL} onChange={handleChange} type="number" step="any" class="w-full bg-appCard border border-appBorder text-white rounded px-3 py-2 text-sm outline-none border-appAccent" placeholder="Enter profit or loss..." /></div>
+                  <div><label class="block text-xs text-gray-400 mb-1">Intraday Gains (₹)</label><input name="intradayGains" value={formData.intradayGains} onChange={handleChange} type="number" step="any" class="w-full bg-appCard border border-appBorder text-white rounded px-3 py-2 text-sm outline-none border-appAccent" placeholder="0.00" /></div>
+                  <div><label class="block text-xs text-gray-400 mb-1">Post-Tax (PAT) (₹)</label><input name="pat" value={formData.pat} onChange={handleChange} type="number" step="any" class="w-full bg-appCard border border-appBorder text-appGreen font-semibold rounded px-3 py-2 text-sm outline-none bg-appGreen/5" title="Auto-deducts 20% on total profit. Losses stay identical." /></div>
+                  <div><label class="block text-xs text-gray-400 mb-1">Notes</label><input name="notes" value={formData.notes} onChange={handleChange} type="text" class="w-full bg-appCard border border-appBorder text-white rounded px-3 py-2 text-sm outline-none" /></div>
+                </div>
+                <div class="flex justify-end"><button type="submit" class="bg-appGreen text-appNavy font-bold px-6 py-2 rounded-lg hover:bg-green-400 transition">Save Trade</button></div>
+              </form>
+            </div>
+          )}
+
+          {importStatus === 'idle' && (
+            <div class="bg-appNavy border border-appBorder rounded-xl pb-2 overflow-x-auto">
+              <div class="flex space-x-4 p-4 border-b border-appBorder">
+                <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)} class="bg-appNavy border border-appBorder text-white rounded px-3 py-1 text-sm outline-none"><option value="All">All</option><option value="Open">Open</option><option value="Closed">Closed</option></select>
+                <select value={filterTrader} onChange={(e) => setFilterTrader(e.target.value)} class="bg-appNavy border border-appBorder text-white rounded px-3 py-1 text-sm outline-none"><option value="All">All</option>{traders.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}</select>
+              </div>
+              <table class="w-full text-left text-xs whitespace-nowrap">
+                <thead class="bg-appCard border-b border-appBorder text-gray-400 uppercase">
+                  <tr>
                     {isAdmin && <th class="p-2 w-8"><input type="checkbox" class="accent-appAccent cursor-pointer" checked={filteredTrades.length > 0 && selectedTradeIds.length === filteredTrades.length} onChange={handleSelectAll} /></th>}
                     <th class="p-2">Asset</th>
                     <th class="p-2">Trader</th>
@@ -683,8 +770,6 @@
       const ADMIN_PIN = "1234"; 
       const [isAdmin, setIsAdmin] = useState(false);
       const [currentView, setCurrentView] = useState('dashboard'); 
-      const [livePrices, setLivePrices] = useState({});
-      const [apiStatusMsg, setApiStatusMsg] = useState("Initializing Tracker...");
       
       const defaultTraders = [{ id: 1, name: 'Anil' }, { id: 2, name: 'Kota' }, { id: 3, name: 'Santosh' }, { id: 4, name: 'Anirudha' }];
       
@@ -706,53 +791,6 @@
 
         return () => { tRef.off(); cRef.off(); trRef.off(); };
       }, []);
-
-      // 🔥 NEW: ROBUST YAHOO FINANCE FETCH ENGINE 🔥
-      useEffect(() => {
-        const fetchLivePrices = async () => {
-          const openTrades = trades.filter(t => t.status === 'Open');
-          if(openTrades.length === 0) return;
-          
-          setApiStatusMsg("Fetching Live NSE Prices...");
-          try {
-            // Append .NS to explicitly target the National Stock Exchange of India
-            const symbols = [...new Set(openTrades.map(t => `${t.symbol}.NS`))].join(',');
-            
-            // Use Yahoo's reliable V7 Quote endpoint instead of the brittle V8 Chart endpoint
-            const yfUrl = `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${symbols}`;
-            const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(yfUrl)}`;
-            
-            const res = await fetch(proxyUrl);
-            const data = await res.json();
-            const parsed = JSON.parse(data.contents);
-            
-            let newPrices = {};
-            if (parsed && parsed.quoteResponse && parsed.quoteResponse.result) {
-              parsed.quoteResponse.result.forEach(quote => {
-                // Strip the .NS back off so it matches your local trade symbols
-                const cleanSymbol = quote.symbol.replace('.NS', '');
-                if(quote.regularMarketPrice) {
-                  newPrices[cleanSymbol] = parseFloat(quote.regularMarketPrice);
-                }
-              });
-            }
-            
-            if (Object.keys(newPrices).length > 0) {
-              setLivePrices(prev => ({...prev, ...newPrices}));
-              setApiStatusMsg(`✅ Live NSE Data Active (Refreshed: ${new Date().toLocaleTimeString()})`);
-            } else {
-              setApiStatusMsg("API Error: No pricing data returned");
-            }
-          } catch (e) { 
-            console.error("API error:", e); 
-            setApiStatusMsg("API Error: Proxy connection failed");
-          }
-        };
-
-        fetchLivePrices();
-        const interval = setInterval(fetchLivePrices, 60000); 
-        return () => clearInterval(interval);
-      }, [trades]);
 
       const setTraders = (data) => { if (db) db.ref('traders').set(data); };
       const setCashLedger = (data) => { if (db) db.ref('cashLedger').set(data); };
@@ -832,7 +870,7 @@
       
       const getButtonClass = (viewName) => `px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${currentView === viewName ? 'bg-appAccent/10 text-appAccent' : 'text-gray-400 hover:text-gray-200 hover:bg-gray-800/50'}`;
 
-      if (!db) return <div class="flex items-center justify-center h-screen bg-appNavy text-gray-400">Loading Cloud Database...</div>;
+      if (!db) return <div class="flex items-center justify-center h-screen bg-appNavy text-gray-400">Loading Cloud Database or Missing Config...</div>;
 
       return (
         <div class="min-h-screen flex flex-col">
@@ -902,8 +940,7 @@
                     </div>
                   </div>
 
-                  {/* LIVE OPEN TRADES TRACKER ON DASHBOARD */}
-                  <LiveOpenTradesTracker trades={trades} traders={traders} livePrices={livePrices} apiStatusMsg={apiStatusMsg} />
+                  <LiveOpenTradesTracker trades={trades} traders={traders} />
 
                   <DashboardCharts trades={trades} traders={traders} />
                 </div>
