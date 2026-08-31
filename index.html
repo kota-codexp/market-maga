@@ -657,7 +657,7 @@
                             {entry.comments && <span class="block">{entry.comments}</span>}
                           </td>
                           {isAdmin && (
-                            <td class="px-4 py-3 relative text-center">
+                            <td class={`px-4 py-3 relative text-center ${activeDropdown === entry.id ? 'z-50' : ''}`}>
                               <button onClick={() => setActiveDropdown(activeDropdown === entry.id ? null : entry.id)} class="text-gray-400 hover:text-white px-2 rounded hover:bg-white/10 font-bold">⋮</button>
                               {activeDropdown === entry.id && (
                                 <div class="absolute right-6 top-8 w-24 bg-appCard border border-appBorder shadow-xl rounded z-50 overflow-hidden text-left">
@@ -840,7 +840,7 @@
                         <td class="p-2 border-l border-appBorder bg-white/5 font-semibold text-appAccent">{t.status === 'Closed' ? formatMoney(netReturn) : '-'}</td>
                         
                         {isAdmin && (
-                          <td class="p-2 text-center relative">
+                          <td class={`p-2 text-center relative ${activeDropdown === t.id ? 'z-50' : ''}`}>
                             <button onClick={() => setActiveDropdown(activeDropdown === t.id ? null : t.id)} class="text-gray-400 hover:text-white px-2 rounded hover:bg-white/10 font-bold">⋮</button>
                             {activeDropdown === t.id && (
                               <div class="absolute right-6 top-8 w-24 bg-appCard border border-appBorder shadow-xl rounded z-50 overflow-hidden text-left">
