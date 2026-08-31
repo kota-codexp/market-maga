@@ -636,7 +636,7 @@
                 <div class="p-4 bg-appCard border-b border-appBorder"><h3 class="text-white font-medium">Monthly Contribution Grid</h3></div>
                 <div class="overflow-x-auto p-4"><table class="w-full text-left text-sm whitespace-nowrap"><thead><tr class="text-gray-400"><th class="pb-3 font-medium">Member</th>{uniqueMonths.map(m => <th key={m} class="pb-3 font-medium px-4 text-center">{m}</th>)}<th class="pb-3 font-medium text-right border-l border-appBorder pl-4">Total Invested</th></tr></thead><tbody class="divide-y divide-appBorder/50">{Object.values(gridData).map((row, idx) => (<tr key={idx} class="hover:bg-white/5 transition"><td class="py-3 text-white font-medium flex items-center">{row.name} {!row.active && <span class="ml-2 px-1 rounded text-[9px] bg-gray-700 text-gray-300">Archived</span>}</td>{uniqueMonths.map(m => { const amount = row.months[m]; if (amount === 0) return <td key={m} class="py-2 px-4 text-center"><div class="border border-dashed border-appRed/50 bg-appRed/10 text-appRed rounded text-xs py-1">No Entry</div></td>; return <td key={m} class="py-3 px-4 text-center text-appGreen">{formatMoney(amount)}</td>; })}<td class="py-3 text-right text-gray-300 border-l border-appBorder pl-4 font-semibold">{formatMoney(row.totalNet)}</td></tr>))}</tbody></table></div>
               </div>
-              <div class="bg-appNavy border border-appBorder rounded-xl overflow-hidden">
+              <div class={`bg-appNavy border border-appBorder rounded-xl overflow-hidden ${activeDropdown ? 'relative z-50' : ''}`}>
                 <div class="p-4 bg-appCard border-b border-appBorder"><h3 class="text-white font-medium">Market Magas PassBook</h3></div>
                 <div class="overflow-x-auto max-h-96">
                   <table class="w-full text-left text-sm whitespace-nowrap">
@@ -657,7 +657,7 @@
                             {entry.comments && <span class="block">{entry.comments}</span>}
                           </td>
                           {isAdmin && (
-                            <td class={`px-4 py-3 relative text-center ${activeDropdown === entry.id ? 'z-50' : ''}`}>
+                            <td class="px-4 py-3 relative text-center">
                               <button onClick={() => setActiveDropdown(activeDropdown === entry.id ? null : entry.id)} class="text-gray-400 hover:text-white px-2 rounded hover:bg-white/10 font-bold">⋮</button>
                               {activeDropdown === entry.id && (
                                 <div class="absolute right-6 top-8 w-24 bg-appCard border border-appBorder shadow-xl rounded z-50 overflow-hidden text-left">
@@ -676,7 +676,7 @@
               </div>
             </div>
           )}
-          {activeDropdown && <div class="fixed inset-0 z-40" onClick={() => setActiveDropdown(null)}></div>}
+          {activeDropdown && <div class="fixed inset-0 z-30" onClick={() => setActiveDropdown(null)}></div>}
         </div>
       );
     }
@@ -786,7 +786,7 @@
           )}
 
           {importStatus === 'idle' && (
-            <div class="bg-appNavy border border-appBorder rounded-xl pb-2 overflow-x-auto">
+            <div class={`bg-appNavy border border-appBorder rounded-xl pb-2 overflow-x-auto ${activeDropdown ? 'relative z-50' : ''}`}>
               <div class="flex space-x-4 p-4 border-b border-appBorder">
                 <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)} class="bg-appNavy border border-appBorder text-white rounded px-3 py-1 text-sm outline-none"><option value="All">All</option><option value="Open">Open</option><option value="Closed">Closed</option></select>
                 <select value={filterTrader} onChange={(e) => setFilterTrader(e.target.value)} class="bg-appNavy border border-appBorder text-white rounded px-3 py-1 text-sm outline-none"><option value="All">All Traders</option>{traders.map(t => <option key={t.id} value={t.id}>{t.name} {t.active === false ? '(Archived)' : ''}</option>)}</select>
@@ -840,7 +840,7 @@
                         <td class="p-2 border-l border-appBorder bg-white/5 font-semibold text-appAccent">{t.status === 'Closed' ? formatMoney(netReturn) : '-'}</td>
                         
                         {isAdmin && (
-                          <td class={`p-2 text-center relative ${activeDropdown === t.id ? 'z-50' : ''}`}>
+                          <td class="p-2 text-center relative">
                             <button onClick={() => setActiveDropdown(activeDropdown === t.id ? null : t.id)} class="text-gray-400 hover:text-white px-2 rounded hover:bg-white/10 font-bold">⋮</button>
                             {activeDropdown === t.id && (
                               <div class="absolute right-6 top-8 w-24 bg-appCard border border-appBorder shadow-xl rounded z-50 overflow-hidden text-left">
@@ -865,7 +865,7 @@
               </table>
             </div>
           )}
-          {activeDropdown && <div class="fixed inset-0 z-40" onClick={() => setActiveDropdown(null)}></div>}
+          {activeDropdown && <div class="fixed inset-0 z-30" onClick={() => setActiveDropdown(null)}></div>}
         </div>
       );
     }
