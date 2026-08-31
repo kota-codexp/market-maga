@@ -561,18 +561,15 @@
       );
     }
 
-    // --- PROFIT SHARE VIEW (FEATURE 2 - ALL TIME UPDATE) ---
+    // --- PROFIT SHARE VIEW (FEATURE 2 - RETAINED ACTIVE PROFIT) ---
     function ProfitShareView({ trades, traders, cashLedger, traderStats }) {
       const activeTraders = traders.filter(t => t.active !== false);
       const archivedTraders = traders.filter(t => t.active === false);
 
-      // PART A — Ongoing split for current members (ALL TIME P&L)
-      let totalAllTimeProfit = 0;
-      trades.forEach(trade => {
-        if (trade.status === 'Closed') {
-          totalAllTimeProfit += (trade.pat - 15.34);
-        }
-      });
+      // PART A — Ongoing split for current members (ACTIVE RETAINED PROFIT)
+      const totalCapitalInFund = activeTraders.reduce((sum, t) => sum + (traderStats[t.id]?.cashHolding || 0) + (traderStats[t.id]?.amountDeployed || 0), 0);
+      const activeNetInvested = activeTraders.reduce((sum, t) => sum + (traderStats[t.id]?.netInvested || 0), 0);
+      const activePoolProfit = totalCapitalInFund - activeNetInvested;
 
       let totalInvestedNow = 0;
       activeTraders.forEach(t => {
@@ -583,7 +580,7 @@
       const currentMemberRows = activeTraders.map(t => {
         const investedNow = traderStats[t.id]?.netInvested || 0;
         const pctOfPool = totalInvestedNow > 0 ? (investedNow / totalInvestedNow) : 0;
-        const profitShare = pctOfPool * totalAllTimeProfit;
+        const profitShare = pctOfPool * activePoolProfit;
         return {
           id: t.id,
           name: t.name,
@@ -686,9 +683,9 @@
               <p class="text-xs text-gray-500 mt-1">Capital currently tied up in active positions</p>
             </div>
             <div class="bg-appNavy border border-appBorder rounded-xl p-6">
-              <p class="text-gray-400 text-sm font-medium mb-1">Pool Profit (All-Time)</p>
-              <p class={`text-3xl font-bold ${totalAllTimeProfit >= 0 ? 'text-appGreen' : 'text-appRed'}`}>{formatMoney(totalAllTimeProfit)}</p>
-              <p class="text-xs text-gray-500 mt-1">Net closed trade return (post-tax & demat fee)</p>
+              <p class="text-gray-400 text-sm font-medium mb-1">Active Pool Profit (Retained)</p>
+              <p class={`text-3xl font-bold ${activePoolProfit >= 0 ? 'text-appGreen' : 'text-appRed'}`}>{formatMoney(activePoolProfit)}</p>
+              <p class="text-xs text-gray-500 mt-1">Live retained profit belonging to active members</p>
             </div>
           </div>
 
@@ -698,7 +695,7 @@
               <div>
                 <h3 class="text-white font-semibold text-lg">Current Members: Ongoing Profit Split</h3>
                 <p class="text-xs text-gray-400 mt-0.5">
-                  Sharing all-time pool profits based on current investment ratio.
+                  Sharing the current retained pool profit based on active investment ratio.
                 </p>
               </div>
             </div>
@@ -710,7 +707,7 @@
                     <th class="px-5 py-4 font-semibold">Invested Now</th>
                     <th class="px-5 py-4 font-semibold text-appAccent">% of Pool</th>
                     <th class="px-5 py-4 font-semibold text-white border-l border-appBorder bg-white/5">
-                      All-Time Profit Share
+                      Retained Profit Share
                     </th>
                   </tr>
                 </thead>
