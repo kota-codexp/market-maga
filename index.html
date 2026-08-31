@@ -1352,8 +1352,9 @@
       const cashAvailableToTrade = activeTraders.reduce((sum, t) => sum + (traderStats[t.id]?.cashHolding || 0), 0);
       const amountDeployed = activeTraders.reduce((sum, t) => sum + (traderStats[t.id]?.amountDeployed || 0), 0);
       
-      // All time pool profit is fund-wide
-      const totalAllTimePoolProfit = trades.reduce((sum, t) => t.status === 'Closed' ? sum + (t.pat - 15.34) : sum, 0);
+      // New calculation for Card 4: Active Retained Profit
+      const activeNetInvested = activeTraders.reduce((sum, t) => sum + (traderStats[t.id]?.netInvested || 0), 0);
+      const activePoolProfit = totalCapitalInFund - activeNetInvested;
 
       const [newTraderName, setNewTraderName] = useState(''); const [editingTraderId, setEditingTraderId] = useState(null); const [editTraderName, setEditTraderName] = useState('');     
       const handleAddTrader = () => { if (newTraderName.trim() === '') return; setTraders([...traders, { id: Date.now(), name: newTraderName.trim(), active: true }]); setNewTraderName(''); };
@@ -1473,8 +1474,8 @@
                       <p class="text-3xl font-bold text-gray-300">{formatMoney(amountDeployed)}</p>
                     </div>
                     <div class="bg-appNavy border border-appBorder rounded-xl p-6">
-                      <p class="text-gray-400 text-sm font-medium mb-1">Total Pool Profit (All-Time)</p>
-                      <p class={`text-3xl font-bold ${totalAllTimePoolProfit >= 0 ? 'text-appGreen' : 'text-appRed'}`}>{formatMoney(totalAllTimePoolProfit)}</p>
+                      <p class="text-gray-400 text-sm font-medium mb-1">Active Pool Profit (Retained)</p>
+                      <p class={`text-3xl font-bold ${activePoolProfit >= 0 ? 'text-appGreen' : 'text-appRed'}`}>{formatMoney(activePoolProfit)}</p>
                     </div>
                   </div>
 
