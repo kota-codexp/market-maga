@@ -360,6 +360,193 @@
       );
     }
 
+    // --- INTERACTIVE SETTLEMENT & AUDIT MODAL (FEATURE 1 ENHANCED) ---
+    function SettlementModal({ trader, traders, cashLedger, trades, traderStats, onClose, onConfirmSettlement }) {
+      if (!trader) return null;
+
+      // Find any existing past withdrawal date for this trader to pre-fill
+      const pastWithdrawals = cashLedger
+        .filter(e => e.fromMemberId === trader.id && e.purpose === 'Withdrawal')
+        .sort((a, b) => new Date(b.date) - new Date(a.date));
+
+      const initialDate = trader.archivedAt || (pastWithdrawals.length > 0 ? pastWithdrawals[0].date : new Date().toISOString().split('T')[0]);
+      const [exitDate, setExitDate] = useState(initialDate);
+      
+      const totalPastWithdrawnOnDate = pastWithdrawals
+        .filter(e => e.date === exitDate)
+        .reduce((sum, e) => sum + e.amount, 0);
+
+      const [amountPaidInput, setAmountPaidInput] = useState(
+        trader.settledAmount !== undefined 
+          ? trader.settledAmount 
+          : (totalPastWithdrawnOnDate > 0 ? totalPastWithdrawnOnDate : (pastWithdrawals.length > 0 ? pastWithdrawals[0].amount : (traderStats[trader.id]?.cashHolding > 0 ? parseFloat(traderStats[trader.id].cashHolding.toFixed(2)) : 0)))
+      );
+
+      const [syncLedger, setSyncLedger] = useState(pastWithdrawals.length === 0);
+
+      // --- Mathematical Engine for Entitled Payout As of exitDate ---
+      let profitBeforeExit = 0;
+      trades.forEach(t => {
+        if (t.status === 'Closed' && t.sellDate && t.sellDate <= exitDate) {
+          profitBeforeExit += (t.pat - 15.34);
+        }
+      });
+
+      // Eligible group members active on or before exitDate
+      const eligibleTraders = traders.filter(other => {
+        const earliestInv = cashLedger
+          .filter(e => e.purpose === 'New Investment' && e.fromMemberId === other.id)
+          .map(e => e.date)
+          .sort()[0];
+        
+        if (!earliestInv || earliestInv > exitDate) return false;
+        if (other.id !== trader.id && other.active === false && other.archivedAt && other.archivedAt < exitDate) return false;
+        return true;
+      });
+
+      let totalInvestedAsOfExit = 0;
+      const capitalByMember = {};
+
+      eligibleTraders.forEach(m => {
+        let cap = 0;
+        cashLedger.forEach(e => {
+          if (e.fromMemberId === m.id) {
+            if (e.purpose === 'New Investment' && e.date <= exitDate) {
+              cap += e.amount;
+            } else if (e.purpose === 'Withdrawal' && e.date < exitDate) {
+              cap -= e.amount; // ignore withdrawals on exitDate as that is the settlement payout itself
+            }
+          }
+        });
+        cap = Math.max(0, cap);
+        capitalByMember[m.id] = cap;
+        totalInvestedAsOfExit += cap;
+      });
+
+      const memberCapitalAtExit = capitalByMember[trader.id] || 0;
+      const poolSharePct = totalInvestedAsOfExit > 0 ? (memberCapitalAtExit / totalInvestedAsOfExit) : 0;
+      const fairProfitShare = poolSharePct * profitBeforeExit;
+      const fairTotalEntitlement = memberCapitalAtExit + fairProfitShare;
+
+      const numActuallyPaid = parseFloat(amountPaidInput) || 0;
+      const difference = numActuallyPaid - fairTotalEntitlement;
+
+      const handleSave = () => {
+        onConfirmSettlement({
+          traderId: trader.id,
+          exitDate: exitDate,
+          settledAmount: numActuallyPaid,
+          fairEntitlement: fairTotalEntitlement,
+          syncLedger: syncLedger
+        });
+      };
+
+      return (
+        <div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-appNavy/90 backdrop-blur-sm animate-fade-in">
+          <div class="bg-appCard border border-appBorder rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[92vh]">
+            <div class="flex justify-between items-center p-5 border-b border-appBorder bg-appNavy shrink-0">
+              <h2 class="text-xl font-bold text-white flex items-center">
+                <span class="text-appAccent mr-2">⚖</span> Settle & Audit Trader: <span class="text-appAccent ml-1.5">{trader.name}</span>
+              </h2>
+              <button onClick={onClose} class="text-gray-400 hover:text-white text-2xl leading-none">&times;</button>
+            </div>
+
+            <div class="p-6 overflow-y-auto space-y-6">
+              <div class="bg-appNavy/60 border border-appBorder rounded-xl p-4 text-xs text-gray-300">
+                This calculator evaluates the pooled fund records up to the exact exit date you select below. It computes their fair capital return and their exact share of all trading profits made up to that day.
+              </div>
+
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label class="block text-xs font-semibold text-gray-300 mb-1">Exit / Settlement Date</label>
+                  <input 
+                    type="date" 
+                    value={exitDate} 
+                    onChange={(e) => setExitDate(e.target.value)} 
+                    class="w-full bg-appNavy border border-appBorder text-white rounded-lg px-3 py-2 text-sm focus:border-appAccent outline-none" 
+                  />
+                  <span class="text-[11px] text-gray-500 mt-1 block">Date payout was or will be executed</span>
+                </div>
+
+                <div>
+                  <label class="block text-xs font-semibold text-gray-300 mb-1">Amount Actually Paid (₹)</label>
+                  <input 
+                    type="number" 
+                    step="any"
+                    value={amountPaidInput} 
+                    onChange={(e) => setAmountPaidInput(e.target.value)} 
+                    class="w-full bg-appNavy border border-appAccent text-white rounded-lg px-3 py-2 text-sm focus:ring-1 ring-appAccent outline-none font-bold" 
+                  />
+                  <span class="text-[11px] text-gray-500 mt-1 block">Handover cash amount</span>
+                </div>
+              </div>
+
+              {/* Settlement Mathematical Breakdown */}
+              <div class="bg-appNavy border border-appBorder rounded-xl p-4 space-y-3">
+                <h4 class="text-xs uppercase font-semibold text-gray-400 tracking-wider">Calculated Fair Share as of {exitDate}</h4>
+                <div class="grid grid-cols-3 gap-3 text-center">
+                  <div class="bg-appCard p-3 rounded-lg border border-appBorder">
+                    <p class="text-[11px] text-gray-400">Principal Capital</p>
+                    <p class="font-bold text-white text-sm">{formatMoney(memberCapitalAtExit)}</p>
+                    <p class="text-[10px] text-appAccent">{(poolSharePct * 100).toFixed(1)}% of pool</p>
+                  </div>
+                  <div class="bg-appCard p-3 rounded-lg border border-appBorder">
+                    <p class="text-[11px] text-gray-400">Fair Profit Share</p>
+                    <p class="font-bold text-appGreen text-sm">{formatMoney(fairProfitShare)}</p>
+                    <p class="text-[10px] text-gray-500">From {formatMoney(profitBeforeExit)} profit</p>
+                  </div>
+                  <div class="bg-appCard p-3 rounded-lg border border-appAccent/40 bg-appAccent/5">
+                    <p class="text-[11px] text-appAccent font-semibold">Total Fair Entitlement</p>
+                    <p class="font-bold text-white text-base">{formatMoney(fairTotalEntitlement)}</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Audit Verdict */}
+              <div class="bg-appCard border border-appBorder rounded-xl p-4">
+                <div class="flex items-center space-x-2 mb-1">
+                  <span class="text-xs font-semibold uppercase text-gray-400">Audit Settlement Verdict:</span>
+                </div>
+                <p class="text-sm text-gray-200">
+                  Based on records up to <b class="text-white">{exitDate}</b>, {trader.name}'s fair entitlement was <b class="text-white">{formatMoney(fairTotalEntitlement)}</b>. 
+                  You indicated a payment of <b class="text-white">{formatMoney(numActuallyPaid)}</b>
+                  {Math.abs(difference) < 1 ? (
+                    <span class="text-appGreen font-bold">, which is an EXACT MATCH with zero variance.</span>
+                  ) : difference > 0 ? (
+                    <span class="text-yellow-400 font-bold">, meaning they were OVERPAID by {formatMoney(difference)}.</span>
+                  ) : (
+                    <span class="text-appRed font-bold">, meaning they were UNDERPAID by {formatMoney(Math.abs(difference))}.</span>
+                  )}
+                </p>
+              </div>
+
+              <div class="flex items-center space-x-2 bg-appNavy p-3 rounded-lg border border-appBorder">
+                <input 
+                  type="checkbox" 
+                  id="syncLedger" 
+                  checked={syncLedger} 
+                  onChange={(e) => setSyncLedger(e.target.checked)} 
+                  class="accent-appAccent cursor-pointer" 
+                />
+                <label for="syncLedger" class="text-xs text-gray-300 cursor-pointer select-none">
+                  Sync/Record this as a <b>Withdrawal</b> passbook entry on <b>{exitDate}</b> in the Cash Ledger.
+                </label>
+              </div>
+            </div>
+
+            <div class="p-4 border-t border-appBorder bg-appNavy flex justify-between items-center shrink-0">
+              <button onClick={onClose} class="px-4 py-2 bg-appCard border border-appBorder text-gray-300 hover:text-white rounded-lg transition text-sm">
+                Cancel
+              </button>
+              <button onClick={handleSave} class="px-6 py-2 bg-appAccent text-appNavy font-bold rounded-lg hover:bg-sky-400 transition text-sm">
+                Confirm & Finalize Settlement
+              </button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
     // --- PROFIT SHARE VIEW (FEATURE 2) ---
     function ProfitShareView({ trades, traders, cashLedger, traderStats }) {
       const activeTraders = traders.filter(t => t.active !== false);
@@ -414,7 +601,6 @@
           }
         });
 
-        // Determine who was in the fund as of this cutover date
         const eligibleTraders = traders.filter(other => {
           const earliestInv = cashLedger
             .filter(e => e.purpose === 'New Investment' && e.fromMemberId === other.id)
@@ -450,12 +636,14 @@
         const fairShareOfProfit = sharePct * profitBeforeCutover;
         const fairTotalPayout = thisTraderInvested + fairShareOfProfit;
 
-        // Default actuallyPaid from withdrawal entries on/after cutoverDate
         const loggedWithdrawals = cashLedger
           .filter(e => e.fromMemberId === trader.id && e.purpose === 'Withdrawal' && (!cutoverDate || e.date >= cutoverDate))
           .reduce((sum, e) => sum + e.amount, 0);
 
-        const actuallyPaid = customPaidMap[trader.id] !== undefined ? customPaidMap[trader.id] : loggedWithdrawals;
+        const actuallyPaid = customPaidMap[trader.id] !== undefined 
+          ? customPaidMap[trader.id] 
+          : (trader.settledAmount !== undefined ? trader.settledAmount : loggedWithdrawals);
+          
         const difference = actuallyPaid - fairTotalPayout;
 
         return {
@@ -479,7 +667,6 @@
             </p>
           </div>
 
-          {/* Quick High-Level Cards */}
           <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
             <div class="bg-appNavy border border-appBorder rounded-xl p-6">
               <p class="text-gray-400 text-sm font-medium mb-1">Cash Available in Pool</p>
@@ -601,7 +788,7 @@
                         <div class="flex-[2] min-w-[280px]">
                           <p class="text-xs text-gray-400 mb-1 font-medium">Audit Verdict:</p>
                           <p class="text-sm text-gray-200">
-                            Based on the ledger, {trader.name}'s fair payout was <b class="text-white">{formatMoney(stats.fairTotalPayout)}</b> ({formatMoney(stats.thisTraderInvested)} of their own money + {formatMoney(stats.fairShareOfProfit)} profit share). You told us you paid them <b class="text-white">{formatMoney(stats.actuallyPaid)}</b>
+                            Based on the ledger, {trader.name}'s fair payout was <b class="text-white">{formatMoney(stats.fairTotalPayout)}</b> ({formatMoney(stats.thisTraderInvested)} capital + {formatMoney(stats.fairShareOfProfit)} profit share). You told us you paid them <b class="text-white">{formatMoney(stats.actuallyPaid)}</b>
                             {Math.abs(stats.difference) < 1 ? (
                               <span class="text-appGreen font-semibold">, which matches their fair share exactly.</span>
                             ) : stats.difference > 0 ? (
@@ -770,7 +957,7 @@
 
           {showForm && importStatus === 'idle' && (
             <div class="bg-appNavy border border-appBorder rounded-xl p-6 shadow-inner animate-fade-in">
-              <h2 class="text-white font-medium mb-4">{editingLedgerId ? 'Edit Passbook Entry' : 'Enter New Passbook Details'}</h2>
+              <h2 class="text-white font-medium mb-4">{editingLedgerId ? 'Edit Passbook Entry' : 'Enter Passbook Details'}</h2>
               <form onSubmit={handleSubmit}>
                 <div class="grid grid-cols-1 md:grid-cols-5 gap-4 items-start mb-4">
                   <div><label class="block text-xs text-gray-400 mb-1">Date</label><input required name="date" value={formData.date} onChange={handleChange} type="date" class="w-full bg-appCard border border-appBorder text-gray-300 rounded px-3 py-2 text-sm focus:border-appAccent outline-none" /></div>
@@ -1050,6 +1237,7 @@
       const [isAdmin, setIsAdmin] = useState(false);
       const [currentView, setCurrentView] = useState('dashboard'); 
       const [showArchivedDashboard, setShowArchivedDashboard] = useState(false);
+      const [settlingTrader, setSettlingTrader] = useState(null);
       
       const defaultTraders = [
         { id: 1, name: 'Anil', active: true }, 
@@ -1153,30 +1341,46 @@
       
       const isTraderSettleable = (traderId) => {
         const stats = traderStats[traderId];
-        return stats && Math.abs(stats.cashHolding) < 1 && stats.amountDeployed === 0;
+        return stats && stats.amountDeployed === 0;
       };
 
-      const handleQuickSettlePayout = (traderId) => {
-        const stats = traderStats[traderId];
-        if (window.confirm(`Record a Withdrawal of ${formatMoney(stats.cashHolding)} dated today for ${stats.name}, covering their full remaining balance (principal + realized profit)? This will bring their cash balance to ₹0.`)) {
-          const newEntry = {
-            id: Date.now(),
-            date: new Date().toISOString().split('T')[0],
-            amount: parseFloat(stats.cashHolding.toFixed(2)),
-            fromMemberId: traderId,
-            toMemberId: traderId,
-            purpose: 'Withdrawal',
-            comments: 'Final settlement payout (auto-recorded)',
-            linkedTradeIds: []
-          };
-          setCashLedger([...cashLedger, newEntry].sort((a, b) => new Date(b.date) - new Date(a.date)));
+      const handleConfirmSettlement = ({ traderId, exitDate, settledAmount, fairEntitlement, syncLedger }) => {
+        let updatedLedger = [...cashLedger];
+        
+        if (syncLedger && settledAmount > 0) {
+          const existingEntry = updatedLedger.find(e => e.fromMemberId === traderId && e.purpose === 'Withdrawal' && e.date === exitDate);
+          if (existingEntry) {
+            updatedLedger = updatedLedger.map(e => e.id === existingEntry.id ? { ...e, amount: settledAmount, comments: `Settlement payout (${formatMoney(settledAmount)})` } : e);
+          } else {
+            updatedLedger.push({
+              id: Date.now(),
+              date: exitDate,
+              amount: settledAmount,
+              fromMemberId: traderId,
+              toMemberId: traderId,
+              purpose: 'Withdrawal',
+              comments: 'Final settlement payout (auto-synced)',
+              linkedTradeIds: []
+            });
+          }
+          setCashLedger(updatedLedger.sort((a, b) => new Date(b.date) - new Date(a.date)));
         }
-      };
 
-      const handleArchiveTrader = (traderId) => {
-        if (window.confirm('Archive this trader? Their full trade/ledger history is preserved and stays visible everywhere, they just stop appearing as an option for new trades/entries. You can reactivate them later.')) {
-          setTraders(traders.map(t => t.id === traderId ? { ...t, active: false, archivedAt: new Date().toISOString().split('T')[0] } : t));
-        }
+        const updatedTraders = traders.map(t => {
+          if (t.id === traderId) {
+            return {
+              ...t,
+              active: false,
+              archivedAt: exitDate,
+              settledAmount: settledAmount,
+              settledFairShare: fairEntitlement
+            };
+          }
+          return t;
+        });
+
+        setTraders(updatedTraders);
+        setSettlingTrader(null);
       };
 
       const handleReactivateTrader = (traderId) => {
@@ -1195,6 +1399,16 @@
 
       return (
         <div class="min-h-screen flex flex-col">
+          <SettlementModal 
+            trader={settlingTrader} 
+            traders={traders} 
+            cashLedger={cashLedger} 
+            trades={trades} 
+            traderStats={traderStats} 
+            onClose={() => setSettlingTrader(null)} 
+            onConfirmSettlement={handleConfirmSettlement} 
+          />
+
           <nav class="bg-appNavy border-b border-appBorder sticky top-0 z-10">
             <div class="max-w-7xl mx-auto px-6 h-20 flex justify-between items-center">
               <div class="text-2xl font-bold tracking-tight text-white uppercase">Market <span class="text-appAccent">Maga</span></div>
@@ -1323,24 +1537,16 @@
                                 <span class="text-gray-400 text-sm border-l border-appBorder pl-4">{formatMoney(stats.cashHolding)} holding</span>
                                 
                                 {isSettleable ? (
-                                  <span class="px-2 py-1 rounded-full text-xs font-semibold bg-appGreen/10 text-appGreen border border-appGreen/30">✅ Ready to Settle</span>
+                                  <span class="px-2 py-1 rounded-full text-xs font-semibold bg-appGreen/10 text-appGreen border border-appGreen/30">✅ Ready to Settle / Audit</span>
                                 ) : (
                                   <span class="px-2 py-1 rounded-full text-xs bg-gray-800 text-gray-300 border border-gray-700">
-                                    Active · {nonZeroHolding ? `${formatMoney(stats.cashHolding)} cash ` : ''}
-                                    {nonZeroHolding && stats.openTradesCount > 0 ? '+ ' : ''}
-                                    {stats.openTradesCount > 0 ? `${stats.openTradesCount} open position(s)` : ''}
+                                    Active · {stats.openTradesCount > 0 ? `${stats.openTradesCount} open position(s)` : ''}
                                   </span>
                                 )}
                               </div>
                               
                               {isAdmin && (
                                 <div class="flex items-center space-x-3">
-                                  {nonZeroHolding && stats.amountDeployed === 0 && (
-                                    <button onClick={() => handleQuickSettlePayout(trader.id)} class="text-appAccent text-xs bg-appAccent/10 px-3 py-1.5 rounded border border-appAccent/30 hover:bg-appAccent/20 transition">
-                                      Record Final Payout ({formatMoney(stats.cashHolding)})
-                                    </button>
-                                  )}
-                                  
                                   {editingTraderId === trader.id ? ( 
                                     <button onClick={saveEditTrader} class="text-appGreen hover:text-green-400 text-sm font-medium">Save</button> 
                                   ) : ( 
@@ -1348,10 +1554,10 @@
                                   )}
                                   
                                   <button 
-                                    onClick={() => handleArchiveTrader(trader.id)} 
+                                    onClick={() => setSettlingTrader(trader)} 
                                     disabled={!isSettleable} 
-                                    title={!isSettleable ? `Still holds ${formatMoney(stats.cashHolding)} or has open positions — clear balance first.` : ''}
-                                    class={`text-sm font-medium px-2 py-1 rounded ${isSettleable ? 'text-appRed hover:bg-appRed/10 transition cursor-pointer' : 'text-gray-600 cursor-not-allowed'}`}
+                                    title={!isSettleable ? 'Trader still has active open positions — close positions before settling.' : ''}
+                                    class={`text-sm font-medium px-3 py-1.5 rounded-lg border ${isSettleable ? 'bg-appRed/10 border-appRed/30 text-appRed hover:bg-appRed/20 transition cursor-pointer' : 'border-gray-700 text-gray-600 cursor-not-allowed'}`}
                                   >
                                     Settle & Remove
                                   </button>
@@ -1364,7 +1570,7 @@
                     </div>
 
                     {archivedTraders.length > 0 && (
-                      <div class="bg-appNavy border border-appBorder rounded-xl overflow-hidden shadow-sm opacity-80">
+                      <div class="bg-appNavy border border-appBorder rounded-xl overflow-hidden shadow-sm opacity-90">
                         <div class="p-4 bg-appCard border-b border-appBorder"><h3 class="text-gray-400 font-medium">Archived / Settled Traders</h3></div>
                         <ul class="divide-y divide-appBorder">
                           {archivedTraders.map((trader) => (
@@ -1373,12 +1579,19 @@
                                 {editingTraderId === trader.id ? ( 
                                   <input type="text" value={editTraderName} onChange={(e) => setEditTraderName(e.target.value)} class="bg-appCard border border-appAccent text-white rounded px-2 py-1 focus:outline-none" /> 
                                 ) : ( 
-                                  <span class="text-gray-400 font-medium min-w-[120px]">{trader.name}</span> 
+                                  <span class="text-gray-300 font-medium min-w-[120px]">{trader.name}</span> 
                                 )}
                                 <span class="text-gray-500 text-xs border-l border-appBorder pl-4">Archived on {trader.archivedAt || 'Unknown'}</span>
                               </div>
                               {isAdmin && (
                                 <div class="flex items-center space-x-3">
+                                  <button 
+                                    onClick={() => setSettlingTrader(trader)} 
+                                    class="text-xs font-semibold text-appAccent bg-appAccent/10 border border-appAccent/30 px-2.5 py-1 rounded hover:bg-appAccent/20 transition"
+                                  >
+                                    Audit / Edit Settlement
+                                  </button>
+
                                   {editingTraderId === trader.id ? ( 
                                     <button onClick={saveEditTrader} class="text-appGreen hover:text-green-400 text-sm font-medium">Save</button> 
                                   ) : ( 
