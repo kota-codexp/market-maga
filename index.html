@@ -1344,9 +1344,16 @@
         }
       });
 
-      const totalCapitalInFund = Object.values(traderStats).reduce((sum, t) => sum + t.cashHolding + t.amountDeployed, 0);
-      const cashAvailableToTrade = Object.values(traderStats).reduce((sum, t) => sum + t.cashHolding, 0);
-      const amountDeployed = Object.values(traderStats).reduce((sum, t) => sum + t.amountDeployed, 0);
+      // Strict calculation specifically mapping ONLY active traders
+      const activeTraders = traders.filter(t => t.active !== false);
+      const archivedTraders = traders.filter(t => t.active === false);
+
+      const totalCapitalInFund = activeTraders.reduce((sum, t) => sum + (traderStats[t.id]?.cashHolding || 0) + (traderStats[t.id]?.amountDeployed || 0), 0);
+      const cashAvailableToTrade = activeTraders.reduce((sum, t) => sum + (traderStats[t.id]?.cashHolding || 0), 0);
+      const amountDeployed = activeTraders.reduce((sum, t) => sum + (traderStats[t.id]?.amountDeployed || 0), 0);
+      
+      // All time pool profit is fund-wide
+      const totalAllTimePoolProfit = trades.reduce((sum, t) => t.status === 'Closed' ? sum + (t.pat - 15.34) : sum, 0);
 
       const [newTraderName, setNewTraderName] = useState(''); const [editingTraderId, setEditingTraderId] = useState(null); const [editTraderName, setEditTraderName] = useState('');     
       const handleAddTrader = () => { if (newTraderName.trim() === '') return; setTraders([...traders, { id: Date.now(), name: newTraderName.trim(), active: true }]); setNewTraderName(''); };
@@ -1406,9 +1413,6 @@
 
       if (!db) return <div class="flex items-center justify-center h-screen bg-appNavy text-gray-400">Loading Cloud Database or Missing Config...</div>;
 
-      const activeTraders = traders.filter(t => t.active !== false);
-      const archivedTraders = traders.filter(t => t.active === false);
-
       return (
         <div class="min-h-screen flex flex-col">
           <SettlementModal 
@@ -1454,10 +1458,24 @@
                     </div>
                   </div>
                   
-                  <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-                    <div class="bg-appNavy border border-appBorder rounded-xl p-6"><p class="text-gray-400 text-sm font-medium mb-1">Total Fund Value</p><p class="text-3xl font-bold text-white">{formatMoney(totalCapitalInFund)}</p></div>
-                    <div class="bg-appNavy border border-appBorder rounded-xl p-6"><p class="text-gray-400 text-sm font-medium mb-1">Total Cash Available</p><p class="text-3xl font-bold text-appAccent">{formatMoney(cashAvailableToTrade)}</p></div>
-                    <div class="bg-appNavy border border-appBorder rounded-xl p-6"><p class="text-gray-400 text-sm font-medium mb-1">Total Deployed (Open)</p><p class="text-3xl font-bold text-gray-300">{formatMoney(amountDeployed)}</p></div>
+                  {/* Updated 2x2 Grid Layout */}
+                  <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+                    <div class="bg-appNavy border border-appBorder rounded-xl p-6">
+                      <p class="text-gray-400 text-sm font-medium mb-1">Total Fund Value</p>
+                      <p class="text-3xl font-bold text-white">{formatMoney(totalCapitalInFund)}</p>
+                    </div>
+                    <div class="bg-appNavy border border-appBorder rounded-xl p-6">
+                      <p class="text-gray-400 text-sm font-medium mb-1">Total Cash Available</p>
+                      <p class="text-3xl font-bold text-appAccent">{formatMoney(cashAvailableToTrade)}</p>
+                    </div>
+                    <div class="bg-appNavy border border-appBorder rounded-xl p-6">
+                      <p class="text-gray-400 text-sm font-medium mb-1">Total Deployed (Open)</p>
+                      <p class="text-3xl font-bold text-gray-300">{formatMoney(amountDeployed)}</p>
+                    </div>
+                    <div class="bg-appNavy border border-appBorder rounded-xl p-6">
+                      <p class="text-gray-400 text-sm font-medium mb-1">Total Pool Profit (All-Time)</p>
+                      <p class={`text-3xl font-bold ${totalAllTimePoolProfit >= 0 ? 'text-appGreen' : 'text-appRed'}`}>{formatMoney(totalAllTimePoolProfit)}</p>
+                    </div>
                   </div>
 
                   <div class="bg-appNavy border border-appBorder rounded-xl overflow-hidden mb-8">
@@ -1468,7 +1486,12 @@
                     <div class="overflow-x-auto">
                       <table class="w-full text-left text-sm whitespace-nowrap">
                         <thead class="bg-appNavy border-b border-appBorder text-gray-400 text-xs uppercase">
-                          <tr><th class="px-5 py-3">Trader Name</th><th class="px-5 py-3">Total Net Invested</th><th class="px-5 py-3 text-appRed">Amount Spent (Deployed)</th><th class="px-5 py-3">All-Time P&L (Inc. Intra)</th><th class="px-5 py-3 text-appAccent font-bold border-l border-appBorder bg-white/5">Current Cash Holding</th></tr>
+                          <tr>
+                            <th class="px-5 py-3">Trader Name</th>
+                            <th class="px-5 py-3">Total Net Invested</th>
+                            <th class="px-5 py-3 text-appRed">Amount Spent (Deployed)</th>
+                            <th class="px-5 py-3 text-appAccent font-bold border-l border-appBorder bg-white/5">Current Cash Holding</th>
+                          </tr>
                         </thead>
                         <tbody class="divide-y divide-appBorder">
                           {activeTraders.map(t => {
@@ -1478,7 +1501,6 @@
                                 <td class="px-5 py-3 font-medium text-white">{stats.name}</td>
                                 <td class="px-5 py-3 text-gray-300">{formatMoney(stats.netInvested)}</td>
                                 <td class="px-5 py-3 text-appRed">{formatMoney(stats.amountDeployed)}</td>
-                                <td class={`px-5 py-3 font-medium ${stats.totalPnL >= 0 ? 'text-appGreen' : 'text-appRed'}`}>{stats.totalPnL >= 0 ? '+' : ''}{formatMoney(stats.totalPnL)}</td>
                                 <td class="px-5 py-3 text-appAccent font-bold border-l border-appBorder bg-white/5">{formatMoney(stats.cashHolding)}</td>
                               </tr>
                             );
@@ -1491,7 +1513,6 @@
                                 <td class="px-5 py-3 font-medium text-gray-500">{stats.name} <span class="text-[10px] ml-1 bg-gray-800 px-1 rounded">Archived</span></td>
                                 <td class="px-5 py-3 text-gray-600">{formatMoney(stats.netInvested)}</td>
                                 <td class="px-5 py-3 text-gray-600">{formatMoney(stats.amountDeployed)}</td>
-                                <td class="px-5 py-3 text-gray-600">{stats.totalPnL >= 0 ? '+' : ''}{formatMoney(stats.totalPnL)}</td>
                                 <td class="px-5 py-3 text-gray-500 border-l border-appBorder">{formatMoney(stats.cashHolding)}</td>
                               </tr>
                             );
