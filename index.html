@@ -360,6 +360,107 @@
       );
     }
 
+    // --- PROFIT SHARE VIEW (NEW) ---
+    function ProfitShareView({ trades, traders, cashLedger }) {
+      let statsMap = {};
+      traders.forEach(t => {
+        statsMap[t.id] = { 
+          id: t.id, name: t.name, active: t.active !== false, 
+          netInvested: 0, ownRealizedProfit: 0 
+        };
+      });
+
+      cashLedger.forEach(entry => {
+        if (entry.purpose === 'New Investment') {
+          if (statsMap[entry.fromMemberId]) statsMap[entry.fromMemberId].netInvested += entry.amount;
+        } else if (entry.purpose === 'Withdrawal') {
+          if (statsMap[entry.fromMemberId]) statsMap[entry.fromMemberId].netInvested -= entry.amount;
+        }
+      });
+
+      trades.forEach(trade => {
+        if (trade.status === 'Closed' && statsMap[trade.traderId]) {
+          statsMap[trade.traderId].ownRealizedProfit += (trade.pat - 15.34);
+        }
+      });
+
+      let totalNetInvested = 0;
+      let totalFundNetProfit = 0;
+
+      Object.values(statsMap).forEach(stats => {
+        stats.netInvested = Math.max(0, stats.netInvested);
+        totalNetInvested += stats.netInvested;
+        totalFundNetProfit += stats.ownRealizedProfit;
+      });
+
+      let sumAdjustments = 0;
+
+      const rows = Object.values(statsMap).map(stats => {
+        const sharePercent = totalNetInvested > 0 ? (stats.netInvested / totalNetInvested) : 0;
+        const entitledProfit = sharePercent * totalFundNetProfit;
+        const adjustment = entitledProfit - stats.ownRealizedProfit;
+        sumAdjustments += adjustment;
+        return { ...stats, sharePercent, entitledProfit, adjustment };
+      });
+
+      return (
+        <div class="animate-fade-in space-y-6">
+          <div class="flex justify-between items-center bg-appNavy border border-appBorder rounded-xl p-5 shadow-inner">
+            <div>
+              <h1 class="text-2xl font-semibold text-white">Profit Share by Investment</h1>
+              <p class="text-sm text-gray-400 mt-1">This shows what each person's profit would be if split strictly by invested capital rather than by which trades they personally made. Use a Custody Transfer entry in the Cash Ledger to record any manual settlement.</p>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+            <div class="bg-appNavy border border-appBorder rounded-xl p-6"><p class="text-gray-400 text-sm font-medium mb-1">Total Fund Net Profit (All-Time)</p><p class="text-3xl font-bold text-white">{formatMoney(totalFundNetProfit)}</p></div>
+            <div class="bg-appNavy border border-appBorder rounded-xl p-6"><p class="text-gray-400 text-sm font-medium mb-1">Total Net Invested (All-Time)</p><p class="text-3xl font-bold text-appAccent">{formatMoney(totalNetInvested)}</p></div>
+            <div class="bg-appNavy border border-appBorder rounded-xl p-6"><p class="text-gray-400 text-sm font-medium mb-1">Traders Included</p><p class="text-3xl font-bold text-gray-300">{traders.length}</p></div>
+          </div>
+
+          <div class="bg-appNavy border border-appBorder rounded-xl overflow-hidden shadow-xl">
+            <div class="p-5 bg-appCard border-b border-appBorder flex justify-between items-center">
+              <h3 class="text-white font-semibold text-lg">Fair Share Adjustments</h3>
+            </div>
+            <div class="overflow-x-auto">
+              <table class="w-full text-left text-sm whitespace-nowrap">
+                <thead class="bg-appNavy border-b border-appBorder text-gray-400 text-xs">
+                  <tr>
+                    <th class="px-5 py-4 font-semibold uppercase text-white">Trader</th>
+                    <th class="px-5 py-4 font-semibold uppercase">Net Invested</th>
+                    <th class="px-5 py-4 font-semibold uppercase text-appAccent">Investment Share %</th>
+                    <th class="px-5 py-4 font-semibold uppercase text-white border-l border-appBorder bg-white/5">Entitled Profit (Fair Share)</th>
+                    <th class="px-5 py-4 font-semibold uppercase text-gray-300 border-l border-appBorder">Actual Profit (Own Trades)</th>
+                    <th class="px-5 py-4 font-semibold uppercase text-white border-l border-appBorder bg-white/5">Adjustment</th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-appBorder/50">
+                  {rows.map((row) => (
+                    <tr key={row.id} class="hover:bg-white/5 transition">
+                      <td class="px-5 py-4 font-bold text-white flex items-center">
+                        {row.name}
+                        {!row.active && <span class="ml-2 px-2 py-0.5 rounded text-[10px] bg-gray-700 text-gray-300">Archived</span>}
+                      </td>
+                      <td class="px-5 py-4 text-gray-300">{formatMoney(row.netInvested)}</td>
+                      <td class="px-5 py-4 text-appAccent font-medium">{(row.sharePercent * 100).toFixed(2)}%</td>
+                      <td class="px-5 py-4 font-bold text-white border-l border-appBorder bg-white/5">{formatMoney(row.entitledProfit)}</td>
+                      <td class="px-5 py-4 text-gray-300 border-l border-appBorder">{formatMoney(row.ownRealizedProfit)}</td>
+                      <td class={`px-5 py-4 font-bold border-l border-appBorder bg-white/5 ${Math.abs(row.adjustment) < 1 ? 'text-gray-500' : (row.adjustment > 0 ? 'text-appGreen' : 'text-appRed')}`}>
+                        {row.adjustment > 0 ? '+' : ''}{formatMoney(row.adjustment)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div class="p-3 bg-appCard border-t border-appBorder text-right">
+              <span class="text-xs text-gray-500 font-medium">Sum of adjustments: {formatMoney(sumAdjustments)}</span>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
     function MonthlyStatementView({ cashLedger, trades, traders }) {
       const allDates = [...cashLedger.map(c => c.date), ...trades.map(t => t.buyDate), ...trades.map(t => t.status === 'Closed' ? t.sellDate : null)].filter(d => d); 
       const uniqueMonths = [...new Set(allDates.map(d => String(d).substring(0, 7)))].sort().reverse(); 
@@ -430,7 +531,7 @@
                   {traders.map((t) => {
                     const open = openingBalances[t.id] || 0; const close = closingBalances[t.id] || 0; const f = flows[t.id];
                     return (
-                      <tr key={t.id} class="hover:bg-white/5 transition"><td class="px-5 py-4 font-bold text-white">{t.name}</td><td class="px-5 py-4 text-gray-300">{formatMoney(open)}</td><td class="px-5 py-4 text-appGreen">{f.invested > 0 ? formatMoney(f.invested) : '-'}</td><td class="px-5 py-4 text-appGreen">{f.transfersIn > 0 ? formatMoney(f.transfersIn) : '-'}</td><td class="px-5 py-4 text-appRed">{f.transfersOut > 0 ? formatMoney(f.transfersOut) : '-'}</td><td class="px-5 py-4 text-appRed">{f.withdrawn > 0 ? formatMoney(f.withdrawn) : '-'}</td><td class="px-5 py-4 text-appRed font-medium">{f.spentOnTrades > 0 ? formatMoney(f.spentOnTrades) : '-'}</td><td class="px-5 py-4 text-appGreen font-medium">{f.returnedFromTrades > 0 ? formatMoney(f.returnedFromTrades) : '-'}</td><td class="px-5 py-4 font-bold text-white border-l border-appBorder bg-white/5">{formatMoney(close)}</td><td class={`px-5 py-4 font-medium border-l border-appBorder border-r ${f.realizedPnL > 0 ? 'text-appGreen' : (f.realizedPnL < 0 ? 'text-appRed' : 'text-gray-500')}`}>{f.realizedPnL !== 0 ? formatMoney(f.realizedPnL) : '-'}</td></tr>
+                      <tr key={t.id} class="hover:bg-white/5 transition"><td class="px-5 py-4 font-bold text-white flex items-center">{t.name} {!t.active && t.active !== undefined && <span class="ml-2 px-1 rounded text-[9px] bg-gray-700 text-gray-300">Archived</span>}</td><td class="px-5 py-4 text-gray-300">{formatMoney(open)}</td><td class="px-5 py-4 text-appGreen">{f.invested > 0 ? formatMoney(f.invested) : '-'}</td><td class="px-5 py-4 text-appGreen">{f.transfersIn > 0 ? formatMoney(f.transfersIn) : '-'}</td><td class="px-5 py-4 text-appRed">{f.transfersOut > 0 ? formatMoney(f.transfersOut) : '-'}</td><td class="px-5 py-4 text-appRed">{f.withdrawn > 0 ? formatMoney(f.withdrawn) : '-'}</td><td class="px-5 py-4 text-appRed font-medium">{f.spentOnTrades > 0 ? formatMoney(f.spentOnTrades) : '-'}</td><td class="px-5 py-4 text-appGreen font-medium">{f.returnedFromTrades > 0 ? formatMoney(f.returnedFromTrades) : '-'}</td><td class="px-5 py-4 font-bold text-white border-l border-appBorder bg-white/5">{formatMoney(close)}</td><td class={`px-5 py-4 font-medium border-l border-appBorder border-r ${f.realizedPnL > 0 ? 'text-appGreen' : (f.realizedPnL < 0 ? 'text-appRed' : 'text-gray-500')}`}>{f.realizedPnL !== 0 ? formatMoney(f.realizedPnL) : '-'}</td></tr>
                     );
                   })}
                 </tbody>
@@ -443,7 +544,8 @@
 
     function CashLedgerView({ cashLedger, setCashLedger, traders, setTraders, trades, isAdmin }) {
       const [showForm, setShowForm] = useState(false); const [editingLedgerId, setEditingLedgerId] = useState(null); const [selectedLedgerIds, setSelectedLedgerIds] = useState([]); 
-      const emptyForm = { date: '', amount: '', fromMemberId: traders[0]?.id || '', toMemberId: traders[3]?.id || '', purpose: 'New Investment', comments: '', linkedTradeIds: [] };
+      const activeTradersList = traders.filter(t => t.active !== false);
+      const emptyForm = { date: '', amount: '', fromMemberId: activeTradersList[0]?.id || '', toMemberId: activeTradersList[0]?.id || '', purpose: 'New Investment', comments: '', linkedTradeIds: [] };
       const [formData, setFormData] = useState(emptyForm);
       const [activeDropdown, setActiveDropdown] = useState(null);
 
@@ -459,7 +561,7 @@
       const handleFileUpload = (e) => { const file = e.target.files[0]; if (!file) return; Papa.parse(file, { header: true, skipEmptyLines: true, complete: (results) => { const headers = results.meta.fields; setCsvHeaders(headers); setCsvRawData(results.data); const initialMap = {}; expectedFields.forEach(field => { const matchedHeader = headers.find(h => field.match.some(alias => h.toLowerCase().includes(alias))); if (matchedHeader) initialMap[field.key] = matchedHeader; }); setColumnMap(initialMap); detectUnknownTraders(initialMap.fromMember, initialMap.toMember, results.data); setImportStatus('mapping'); } }); e.target.value = ''; };
       const detectUnknownTraders = (fromCol, toCol, data) => { if (!fromCol && !toCol) { setUnknownTraders([]); return; } const uniqueNames = new Set(); data.forEach(row => { if (fromCol && row[fromCol]) uniqueNames.add(row[fromCol].trim()); if (toCol && row[toCol]) uniqueNames.add(row[toCol].trim()); }); const existingNamesUpper = traders.map(t => t.name.toUpperCase()); const missing = [...uniqueNames].filter(n => n && !existingNamesUpper.includes(n.toUpperCase())); setUnknownTraders(missing); const initialTraderMap = {}; missing.forEach(m => initialTraderMap[m] = 'NEW'); setTraderMap(initialTraderMap); };
       const handleColumnMapChange = (fieldKey, selectedHeader) => { const newMap = { ...columnMap, [fieldKey]: selectedHeader }; setColumnMap(newMap); detectUnknownTraders(newMap.fromMember, newMap.toMember, csvRawData); };
-      const executeImport = () => { let successfulEntries = []; let failedRows = []; let newlyAddedTraders = [...traders]; const parseNum = (val) => { if (!val) return null; const num = parseFloat(String(val).replace(/[^0-9.-]+/g,"")); return isNaN(num) ? null : num; }; const resolveTraderId = (nameString) => { if (!nameString) return null; nameString = nameString.trim(); const existingMatch = newlyAddedTraders.find(t => t.name.toUpperCase() === nameString.toUpperCase()); if (existingMatch) return existingMatch.id; const decision = traderMap[nameString]; if (decision === 'NEW') { const newTrader = { id: Date.now() + Math.random(), name: nameString }; newlyAddedTraders.push(newTrader); return newTrader.id; } return parseInt(decision); };
+      const executeImport = () => { let successfulEntries = []; let failedRows = []; let newlyAddedTraders = [...traders]; const parseNum = (val) => { if (!val) return null; const num = parseFloat(String(val).replace(/[^0-9.-]+/g,"")); return isNaN(num) ? null : num; }; const resolveTraderId = (nameString) => { if (!nameString) return null; nameString = nameString.trim(); const existingMatch = newlyAddedTraders.find(t => t.name.toUpperCase() === nameString.toUpperCase()); if (existingMatch) return existingMatch.id; const decision = traderMap[nameString]; if (decision === 'NEW') { const newTrader = { id: Date.now() + Math.random(), name: nameString, active: true }; newlyAddedTraders.push(newTrader); return newTrader.id; } return parseInt(decision); };
         csvRawData.forEach((row, index) => {
           const date = cleanDateForInput(row[columnMap.date]); const amt = parseNum(row[columnMap.amount]); const fromName = row[columnMap.fromMember]; const toName = row[columnMap.toMember]; const rawPurpose = row[columnMap.purpose] || '';
           if (!date || amt === null || !fromName || !toName) { failedRows.push(`Row ${index + 2}: Missing mandatory fields`); return; }
@@ -472,13 +574,12 @@
 
       const getTraderName = (id) => traders.find(tr => tr.id === id)?.name || 'Unknown';
       
-      // FIX 1: Safely filter and calculate unique months without crashing on missing dates
       const contributions = cashLedger.filter(c => c.purpose === 'New Investment'); 
       const uniqueMonths = [...new Set(contributions.filter(c => c && c.date).map(c => String(c.date).substring(0, 7)))].sort(); 
       
       const gridData = {}; 
       traders.forEach(t => { 
-        gridData[t.id] = { name: t.name, totalNet: 0, months: {} }; 
+        gridData[t.id] = { name: t.name, active: t.active !== false, totalNet: 0, months: {} }; 
         uniqueMonths.forEach(m => gridData[t.id].months[m] = 0); 
       });
       
@@ -514,8 +615,8 @@
                 <div class="grid grid-cols-1 md:grid-cols-5 gap-4 items-start mb-4">
                   <div><label class="block text-xs text-gray-400 mb-1">Date</label><input required name="date" value={formData.date} onChange={handleChange} type="date" class="w-full bg-appCard border border-appBorder text-gray-300 rounded px-3 py-2 text-sm focus:border-appAccent outline-none" /></div>
                   <div><label class="block text-xs text-gray-400 mb-1">Amount (₹)</label><input required name="amount" value={formData.amount} onChange={handleChange} type="number" step="any" min="1" class="w-full bg-appCard border border-appBorder text-white rounded px-3 py-2 text-sm focus:border-appAccent outline-none" /></div>
-                  <div><label class="block text-xs text-gray-400 mb-1">From</label><select name="fromMemberId" value={formData.fromMemberId} onChange={handleChange} class="w-full bg-appCard border border-appBorder text-white rounded px-3 py-2 text-sm focus:border-appAccent outline-none">{traders.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}</select></div>
-                  <div><label class="block text-xs text-gray-400 mb-1">To</label><select name="toMemberId" value={formData.toMemberId} onChange={handleChange} class="w-full bg-appCard border border-appBorder text-white rounded px-3 py-2 text-sm focus:border-appAccent outline-none">{traders.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}</select></div>
+                  <div><label class="block text-xs text-gray-400 mb-1">From</label><select name="fromMemberId" value={formData.fromMemberId} onChange={handleChange} class="w-full bg-appCard border border-appBorder text-white rounded px-3 py-2 text-sm focus:border-appAccent outline-none">{traders.filter(t => t.active !== false || t.id === parseInt(formData.fromMemberId)).map(t => <option key={t.id} value={t.id}>{t.name}</option>)}</select></div>
+                  <div><label class="block text-xs text-gray-400 mb-1">To</label><select name="toMemberId" value={formData.toMemberId} onChange={handleChange} class="w-full bg-appCard border border-appBorder text-white rounded px-3 py-2 text-sm focus:border-appAccent outline-none">{traders.filter(t => t.active !== false || t.id === parseInt(formData.toMemberId)).map(t => <option key={t.id} value={t.id}>{t.name}</option>)}</select></div>
                   <div><label class="block text-xs text-gray-400 mb-1">Purpose</label><select name="purpose" value={formData.purpose} onChange={handleChange} class="w-full bg-appCard border border-appBorder text-white rounded px-3 py-2 text-sm focus:border-appAccent outline-none"><option value="New Investment">New Investment</option><option value="Stock Sales">Stock Sales</option><option value="Withdrawal">Withdrawal</option><option value="Custody Transfer">Custody Transfer</option><option value="Other">Other</option></select></div>
                 </div>
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-4 border-t border-appBorder pt-4">
@@ -533,7 +634,7 @@
             <div class="space-y-8 animate-fade-in">
               <div class="bg-appNavy border border-appBorder rounded-xl overflow-hidden">
                 <div class="p-4 bg-appCard border-b border-appBorder"><h3 class="text-white font-medium">Monthly Contribution Grid</h3></div>
-                <div class="overflow-x-auto p-4"><table class="w-full text-left text-sm whitespace-nowrap"><thead><tr class="text-gray-400"><th class="pb-3 font-medium">Member</th>{uniqueMonths.map(m => <th key={m} class="pb-3 font-medium px-4 text-center">{m}</th>)}<th class="pb-3 font-medium text-right border-l border-appBorder pl-4">Total Invested</th></tr></thead><tbody class="divide-y divide-appBorder/50">{Object.values(gridData).map((row, idx) => (<tr key={idx} class="hover:bg-white/5 transition"><td class="py-3 text-white font-medium">{row.name}</td>{uniqueMonths.map(m => { const amount = row.months[m]; if (amount === 0) return <td key={m} class="py-2 px-4 text-center"><div class="border border-dashed border-appRed/50 bg-appRed/10 text-appRed rounded text-xs py-1">No Entry</div></td>; return <td key={m} class="py-3 px-4 text-center text-appGreen">{formatMoney(amount)}</td>; })}<td class="py-3 text-right text-gray-300 border-l border-appBorder pl-4 font-semibold">{formatMoney(row.totalNet)}</td></tr>))}</tbody></table></div>
+                <div class="overflow-x-auto p-4"><table class="w-full text-left text-sm whitespace-nowrap"><thead><tr class="text-gray-400"><th class="pb-3 font-medium">Member</th>{uniqueMonths.map(m => <th key={m} class="pb-3 font-medium px-4 text-center">{m}</th>)}<th class="pb-3 font-medium text-right border-l border-appBorder pl-4">Total Invested</th></tr></thead><tbody class="divide-y divide-appBorder/50">{Object.values(gridData).map((row, idx) => (<tr key={idx} class="hover:bg-white/5 transition"><td class="py-3 text-white font-medium flex items-center">{row.name} {!row.active && <span class="ml-2 px-1 rounded text-[9px] bg-gray-700 text-gray-300">Archived</span>}</td>{uniqueMonths.map(m => { const amount = row.months[m]; if (amount === 0) return <td key={m} class="py-2 px-4 text-center"><div class="border border-dashed border-appRed/50 bg-appRed/10 text-appRed rounded text-xs py-1">No Entry</div></td>; return <td key={m} class="py-3 px-4 text-center text-appGreen">{formatMoney(amount)}</td>; })}<td class="py-3 text-right text-gray-300 border-l border-appBorder pl-4 font-semibold">{formatMoney(row.totalNet)}</td></tr>))}</tbody></table></div>
               </div>
               <div class="bg-appNavy border border-appBorder rounded-xl overflow-hidden">
                 <div class="p-4 bg-appCard border-b border-appBorder"><h3 class="text-white font-medium">Market Magas PassBook</h3></div>
@@ -552,7 +653,6 @@
                           {isAdmin && <td class="px-4 py-3"><input type="checkbox" class="accent-appAccent cursor-pointer" checked={selectedLedgerIds.includes(entry.id)} onChange={(e) => { if (e.target.checked) setSelectedLedgerIds([...selectedLedgerIds, entry.id]); else setSelectedLedgerIds(selectedLedgerIds.filter(id => id !== entry.id)); }} /></td>}
                           <td class="px-4 py-3 text-gray-300">{entry.date}</td><td class="px-4 py-3 text-right text-white font-medium">{formatMoney(entry.amount)}</td><td class="px-4 py-3"><span class="bg-appCard border border-appBorder px-2 py-1 rounded text-gray-300">{getTraderName(entry.fromMemberId)}</span></td><td class="px-4 py-3"><span class="bg-appCard border border-appBorder px-2 py-1 rounded text-gray-300">{getTraderName(entry.toMemberId)}</span></td><td class="px-4 py-3"><span class={`px-2 py-1 rounded text-xs ${entry.purpose === 'New Investment' ? 'bg-appGreen/10 text-appGreen' : entry.purpose === 'Withdrawal' ? 'bg-appRed/10 text-appRed' : 'bg-appAccent/10 text-appAccent'}`}>{entry.purpose}</span></td>
                           <td class="px-4 py-3 text-gray-400 text-xs">
-                            {/* FIX 2: Safely map linked trades without crashing on corrupted data */}
                             {Array.isArray(entry.linkedTradeIds) && entry.linkedTradeIds.length > 0 && (<span class="text-appAccent block mb-1 font-medium">Trades: {entry.linkedTradeIds.map(id => trades.find(t => t.id === id)?.symbol).filter(Boolean).join(', ')}</span>)}
                             {entry.comments && <span class="block">{entry.comments}</span>}
                           </td>
@@ -586,7 +686,8 @@
       const [activeDropdown, setActiveDropdown] = useState(null);
       const [analyzerTrade, setAnalyzerTrade] = useState(null);
 
-      const emptyForm = { symbol: '', traderId: traders[0]?.id || '', buyDate: '', sellDate: '', qty: '', buyPrice: '', sellPrice: '', isIntraday: 'false', actualPnL: '', intradayGains: '', pat: '', notes: '', capitalInjected: '', linkedLedgerEntryId: null };
+      const activeTradersList = traders.filter(t => t.active !== false);
+      const emptyForm = { symbol: '', traderId: activeTradersList[0]?.id || '', buyDate: '', sellDate: '', qty: '', buyPrice: '', sellPrice: '', isIntraday: 'false', actualPnL: '', intradayGains: '', pat: '', notes: '', capitalInjected: '', linkedLedgerEntryId: null };
       const [formData, setFormData] = useState(emptyForm);
       
       const handleChange = (e) => { 
@@ -628,7 +729,7 @@
       const handleFileUpload = (e) => { const file = e.target.files[0]; if (!file) return; Papa.parse(file, { header: true, skipEmptyLines: true, complete: (results) => { setCsvHeaders(results.meta.fields); setCsvRawData(results.data); const initialMap = {}; expectedFields.forEach(field => { const matchedHeader = results.meta.fields.find(h => field.match.some(alias => h.toLowerCase().includes(alias))); if (matchedHeader) initialMap[field.key] = matchedHeader; }); setColumnMap(initialMap); detectUnknownTraders(initialMap.traderName, results.data); setImportStatus('mapping'); } }); e.target.value = ''; };
       const detectUnknownTraders = (traderColName, data) => { if (!traderColName) { setUnknownTraders([]); return; } const uniqueNamesInCSV = [...new Set(data.map(row => (row[traderColName] || '').trim()).filter(n => n !== ''))]; const existingNamesUpper = traders.map(t => t.name.toUpperCase()); const missing = uniqueNamesInCSV.filter(name => !existingNamesUpper.includes(name.toUpperCase())); setUnknownTraders(missing); const initialTraderMap = {}; missing.forEach(m => initialTraderMap[m] = 'NEW'); setTraderMap(initialTraderMap); };
       const handleColumnMapChange = (fieldKey, selectedHeader) => { const newMap = { ...columnMap, [fieldKey]: selectedHeader }; setColumnMap(newMap); if (fieldKey === 'traderName') detectUnknownTraders(selectedHeader, csvRawData); };
-      const executeImport = () => { let successfulTrades = []; let failedRows = []; let newlyAddedTraders = [...traders]; const parseNum = (val) => { if (!val) return null; const num = parseFloat(String(val).replace(/[^0-9.-]+/g,"")); return isNaN(num) ? null : num; }; csvRawData.forEach((row, index) => { const sym = row[columnMap.symbol]; const bDate = cleanDateForInput(row[columnMap.buyDate]); const bPrice = parseNum(row[columnMap.buyPrice]); const qty = parseNum(row[columnMap.qty]); const traderNameString = (row[columnMap.traderName] || '').trim(); if (!sym || !bDate || bPrice === null || qty === null || !traderNameString) { failedRows.push(`Row ${index + 2}: Missing mandatory fields`); return; } let finalTraderId = null; const existingMatch = newlyAddedTraders.find(t => t.name.toUpperCase() === traderNameString.toUpperCase()); if (existingMatch) { finalTraderId = existingMatch.id; } else { const decision = traderMap[traderNameString]; if (decision === 'NEW') { const newTrader = { id: Date.now() + Math.random(), name: traderNameString }; newlyAddedTraders.push(newTrader); finalTraderId = newTrader.id; } else { finalTraderId = parseInt(decision); } } const sDate = cleanDateForInput(row[columnMap.sellDate]) || null; const sPrice = parseNum(row[columnMap.sellPrice]); const isClosed = sDate && sPrice !== null; const rawIntraday = (row[columnMap.isIntraday] || '').toLowerCase(); const isIntraday = ['yes', 'true', '1', 'y'].includes(rawIntraday); let importedActual = parseNum(row[columnMap.actualPnL]) || 0; let importedIntra = parseNum(row[columnMap.intradayGains]) || 0; let importedPat = parseNum(row[columnMap.pat]); if (importedPat === null && isClosed) { let preTax = importedActual + importedIntra; importedPat = preTax > 0 ? preTax * 0.8 : preTax; } const trade = { id: Date.now() + Math.random(), symbol: sym.toUpperCase(), traderId: finalTraderId, buyDate: bDate, sellDate: isClosed ? sDate : null, qty: qty, buyPrice: bPrice, sellPrice: isClosed ? sPrice : null, isIntraday: isIntraday, actualPnL: isClosed ? importedActual : 0, intradayGains: isClosed ? importedIntra : 0, pat: isClosed ? (importedPat || 0) : 0, notes: row[columnMap.notes] || '', status: isClosed ? 'Closed' : 'Open', linkedLedgerEntryId: null }; successfulTrades.push(trade); }); setTraders(newlyAddedTraders); setTrades([...trades, ...successfulTrades]); setImportSummary({ successCount: successfulTrades.length, fails: failedRows }); setImportStatus('summary'); };
+      const executeImport = () => { let successfulTrades = []; let failedRows = []; let newlyAddedTraders = [...traders]; const parseNum = (val) => { if (!val) return null; const num = parseFloat(String(val).replace(/[^0-9.-]+/g,"")); return isNaN(num) ? null : num; }; csvRawData.forEach((row, index) => { const sym = row[columnMap.symbol]; const bDate = cleanDateForInput(row[columnMap.buyDate]); const bPrice = parseNum(row[columnMap.buyPrice]); const qty = parseNum(row[columnMap.qty]); const traderNameString = (row[columnMap.traderName] || '').trim(); if (!sym || !bDate || bPrice === null || qty === null || !traderNameString) { failedRows.push(`Row ${index + 2}: Missing mandatory fields`); return; } let finalTraderId = null; const existingMatch = newlyAddedTraders.find(t => t.name.toUpperCase() === traderNameString.toUpperCase()); if (existingMatch) { finalTraderId = existingMatch.id; } else { const decision = traderMap[traderNameString]; if (decision === 'NEW') { const newTrader = { id: Date.now() + Math.random(), name: traderNameString, active: true }; newlyAddedTraders.push(newTrader); finalTraderId = newTrader.id; } else { finalTraderId = parseInt(decision); } } const sDate = cleanDateForInput(row[columnMap.sellDate]) || null; const sPrice = parseNum(row[columnMap.sellPrice]); const isClosed = sDate && sPrice !== null; const rawIntraday = (row[columnMap.isIntraday] || '').toLowerCase(); const isIntraday = ['yes', 'true', '1', 'y'].includes(rawIntraday); let importedActual = parseNum(row[columnMap.actualPnL]) || 0; let importedIntra = parseNum(row[columnMap.intradayGains]) || 0; let importedPat = parseNum(row[columnMap.pat]); if (importedPat === null && isClosed) { let preTax = importedActual + importedIntra; importedPat = preTax > 0 ? preTax * 0.8 : preTax; } const trade = { id: Date.now() + Math.random(), symbol: sym.toUpperCase(), traderId: finalTraderId, buyDate: bDate, sellDate: isClosed ? sDate : null, qty: qty, buyPrice: bPrice, sellPrice: isClosed ? sPrice : null, isIntraday: isIntraday, actualPnL: isClosed ? importedActual : 0, intradayGains: isClosed ? importedIntra : 0, pat: isClosed ? (importedPat || 0) : 0, notes: row[columnMap.notes] || '', status: isClosed ? 'Closed' : 'Open', linkedLedgerEntryId: null }; successfulTrades.push(trade); }); setTraders(newlyAddedTraders); setTrades([...trades, ...successfulTrades]); setImportSummary({ successCount: successfulTrades.length, fails: failedRows }); setImportStatus('summary'); };
 
       const filteredTrades = trades.filter(t => (filterTrader === 'All' || t.traderId === parseInt(filterTrader)) && (filterStatus === 'All' || t.status === filterStatus));
       const totalActualPnL = filteredTrades.reduce((sum, t) => sum + (t.actualPnL || 0) + (t.intradayGains || 0), 0); 
@@ -661,7 +762,7 @@
               <form onSubmit={handleSubmit}>
                 <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
                   <div><label class="block text-xs text-gray-400 mb-1">Symbol/Stock</label><input required name="symbol" value={formData.symbol} onChange={handleChange} type="text" class="w-full bg-appCard border border-appBorder text-white rounded px-3 py-2 text-sm outline-none uppercase" /></div>
-                  <div><label class="block text-xs text-gray-400 mb-1">Trader</label><select required name="traderId" value={formData.traderId} onChange={handleChange} class="w-full bg-appCard border border-appBorder text-white rounded px-3 py-2 text-sm outline-none">{traders.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}</select></div>
+                  <div><label class="block text-xs text-gray-400 mb-1">Trader</label><select required name="traderId" value={formData.traderId} onChange={handleChange} class="w-full bg-appCard border border-appBorder text-white rounded px-3 py-2 text-sm outline-none">{traders.filter(t => t.active !== false || t.id === parseInt(formData.traderId)).map(t => <option key={t.id} value={t.id}>{t.name}</option>)}</select></div>
                   <div><label class="block text-xs text-gray-400 mb-1">Intraday?</label><select name="isIntraday" value={formData.isIntraday} onChange={handleChange} class="w-full bg-appCard border border-appBorder text-white rounded px-3 py-2 text-sm outline-none"><option value="false">No</option><option value="true">Yes</option></select></div>
                   <div><label class="block text-xs text-gray-400 mb-1">Quantity</label><input required name="qty" value={formData.qty} onChange={handleChange} type="number" step="any" class="w-full bg-appCard border border-appBorder text-white rounded px-3 py-2 text-sm outline-none" /></div>
                   <div><label class="block text-xs text-gray-400 mb-1">Buy Date</label><input required name="buyDate" value={formData.buyDate} onChange={handleChange} type="date" class="w-full bg-appCard border border-appBorder text-gray-300 rounded px-3 py-2 text-sm outline-none" /></div>
@@ -688,7 +789,7 @@
             <div class="bg-appNavy border border-appBorder rounded-xl pb-2 overflow-x-auto">
               <div class="flex space-x-4 p-4 border-b border-appBorder">
                 <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)} class="bg-appNavy border border-appBorder text-white rounded px-3 py-1 text-sm outline-none"><option value="All">All</option><option value="Open">Open</option><option value="Closed">Closed</option></select>
-                <select value={filterTrader} onChange={(e) => setFilterTrader(e.target.value)} class="bg-appNavy border border-appBorder text-white rounded px-3 py-1 text-sm outline-none"><option value="All">All</option>{traders.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}</select>
+                <select value={filterTrader} onChange={(e) => setFilterTrader(e.target.value)} class="bg-appNavy border border-appBorder text-white rounded px-3 py-1 text-sm outline-none"><option value="All">All Traders</option>{traders.map(t => <option key={t.id} value={t.id}>{t.name} {t.active === false ? '(Archived)' : ''}</option>)}</select>
               </div>
               <table class="w-full text-left text-xs whitespace-nowrap">
                 <thead class="bg-appCard border-b border-appBorder text-gray-400 uppercase">
@@ -797,8 +898,14 @@
       const ADMIN_PIN = "1234"; 
       const [isAdmin, setIsAdmin] = useState(false);
       const [currentView, setCurrentView] = useState('dashboard'); 
+      const [showArchivedDashboard, setShowArchivedDashboard] = useState(false);
       
-      const defaultTraders = [{ id: 1, name: 'Anil' }, { id: 2, name: 'Kota' }, { id: 3, name: 'Santosh' }, { id: 4, name: 'Anirudha' }];
+      const defaultTraders = [
+        { id: 1, name: 'Anil', active: true }, 
+        { id: 2, name: 'Kota', active: true }, 
+        { id: 3, name: 'Santosh', active: true }, 
+        { id: 4, name: 'Anirudha', active: true }
+      ];
       
       const [traders, setTradersState] = useState([]);
       const [cashLedger, setCashLedgerState] = useState([]);
@@ -855,7 +962,7 @@
       };
 
       let traderStats = {};
-      traders.forEach(t => traderStats[t.id] = { name: t.name, netInvested: 0, amountDeployed: 0, totalPnL: 0, cashHolding: 0 });
+      traders.forEach(t => traderStats[t.id] = { name: t.name, active: t.active, netInvested: 0, amountDeployed: 0, totalPnL: 0, cashHolding: 0, openTradesCount: 0 });
 
       cashLedger.forEach(entry => {
         if (entry.purpose === 'New Investment') {
@@ -879,6 +986,7 @@
           }
         } else {
           if (traderStats[trade.traderId]) {
+            traderStats[trade.traderId].openTradesCount += 1;
             traderStats[trade.traderId].amountDeployed += (trade.buyPrice * trade.qty);
             traderStats[trade.traderId].cashHolding -= (trade.buyPrice * trade.qty);
           }
@@ -890,14 +998,49 @@
       const amountDeployed = Object.values(traderStats).reduce((sum, t) => sum + t.amountDeployed, 0);
 
       const [newTraderName, setNewTraderName] = useState(''); const [editingTraderId, setEditingTraderId] = useState(null); const [editTraderName, setEditTraderName] = useState('');     
-      const handleAddTrader = () => { if (newTraderName.trim() === '') return; setTraders([...traders, { id: Date.now(), name: newTraderName.trim() }]); setNewTraderName(''); };
-      const handleDeleteTrader = (id) => setTraders(traders.filter(t => t.id !== id));
+      const handleAddTrader = () => { if (newTraderName.trim() === '') return; setTraders([...traders, { id: Date.now(), name: newTraderName.trim(), active: true }]); setNewTraderName(''); };
+      
+      const isTraderSettleable = (traderId) => {
+        const stats = traderStats[traderId];
+        return stats && Math.abs(stats.cashHolding) < 1 && stats.amountDeployed === 0;
+      };
+
+      const handleQuickSettlePayout = (traderId) => {
+        const stats = traderStats[traderId];
+        if (window.confirm(`Record a Withdrawal of ${formatMoney(stats.cashHolding)} dated today for ${stats.name}, covering their full remaining balance (principal + realized profit)? This will bring their cash balance to ₹0.`)) {
+          const newEntry = {
+            id: Date.now(),
+            date: new Date().toISOString().split('T')[0],
+            amount: parseFloat(stats.cashHolding.toFixed(2)),
+            fromMemberId: traderId,
+            toMemberId: traderId,
+            purpose: 'Withdrawal',
+            comments: 'Final settlement payout (auto-recorded)',
+            linkedTradeIds: []
+          };
+          setCashLedger([...cashLedger, newEntry].sort((a, b) => new Date(b.date) - new Date(a.date)));
+        }
+      };
+
+      const handleArchiveTrader = (traderId) => {
+        if (window.confirm('Archive this trader? Their full trade/ledger history is preserved and stays visible everywhere, they just stop appearing as an option for new trades/entries. You can reactivate them later.')) {
+          setTraders(traders.map(t => t.id === traderId ? { ...t, active: false, archivedAt: new Date().toISOString().split('T')[0] } : t));
+        }
+      };
+
+      const handleReactivateTrader = (traderId) => {
+        setTraders(traders.map(t => t.id === traderId ? { ...t, active: true, archivedAt: null } : t));
+      };
+
       const startEditingTrader = (t) => { setEditingTraderId(t.id); setEditTraderName(t.name); };
       const saveEditTrader = () => { setTraders(traders.map(t => t.id === editingTraderId ? { ...t, name: editTraderName.trim() } : t)); setEditingTraderId(null); };
       
       const getButtonClass = (viewName) => `px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${currentView === viewName ? 'bg-appAccent/10 text-appAccent' : 'text-gray-400 hover:text-gray-200 hover:bg-gray-800/50'}`;
 
       if (!db) return <div class="flex items-center justify-center h-screen bg-appNavy text-gray-400">Loading Cloud Database or Missing Config...</div>;
+
+      const activeTraders = traders.filter(t => t.active !== false);
+      const archivedTraders = traders.filter(t => t.active === false);
 
       return (
         <div class="min-h-screen flex flex-col">
@@ -910,6 +1053,7 @@
                   <button onClick={() => setCurrentView('tradelog')} class={getButtonClass('tradelog')}>Trade Log</button>
                   <button onClick={() => setCurrentView('ledger')} class={getButtonClass('ledger')}>Cash Ledger</button>
                   <button onClick={() => setCurrentView('statements')} class={getButtonClass('statements')}>Monthly Statements</button>
+                  <button onClick={() => setCurrentView('profitshare')} class={getButtonClass('profitshare')}>Profit Share</button>
                   <button onClick={() => setCurrentView('traders')} class={getButtonClass('traders')}>Manage Traders</button>
                 </div>
                 <button onClick={toggleAdmin} class={`ml-4 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${isAdmin ? 'bg-appGreen/20 text-appGreen border border-appGreen/30' : 'bg-gray-800/80 text-gray-400 border border-gray-700'}`}>
@@ -950,7 +1094,7 @@
                           <tr><th class="px-5 py-3">Trader Name</th><th class="px-5 py-3">Total Net Invested</th><th class="px-5 py-3 text-appRed">Amount Spent (Deployed)</th><th class="px-5 py-3">All-Time P&L (Inc. Intra)</th><th class="px-5 py-3 text-appAccent font-bold border-l border-appBorder bg-white/5">Current Cash Holding</th></tr>
                         </thead>
                         <tbody class="divide-y divide-appBorder">
-                          {traders.map(t => {
+                          {activeTraders.map(t => {
                             const stats = traderStats[t.id];
                             return (
                               <tr key={t.id} class="hover:bg-white/5 transition">
@@ -962,14 +1106,32 @@
                               </tr>
                             );
                           })}
+                          
+                          {showArchivedDashboard && archivedTraders.map(t => {
+                            const stats = traderStats[t.id];
+                            return (
+                              <tr key={t.id} class="hover:bg-white/5 transition bg-appNavy/50">
+                                <td class="px-5 py-3 font-medium text-gray-500">{stats.name} <span class="text-[10px] ml-1 bg-gray-800 px-1 rounded">Archived</span></td>
+                                <td class="px-5 py-3 text-gray-600">{formatMoney(stats.netInvested)}</td>
+                                <td class="px-5 py-3 text-gray-600">{formatMoney(stats.amountDeployed)}</td>
+                                <td class="px-5 py-3 text-gray-600">{stats.totalPnL >= 0 ? '+' : ''}{formatMoney(stats.totalPnL)}</td>
+                                <td class="px-5 py-3 text-gray-500 border-l border-appBorder">{formatMoney(stats.cashHolding)}</td>
+                              </tr>
+                            );
+                          })}
                         </tbody>
                       </table>
                     </div>
+                    {archivedTraders.length > 0 && (
+                      <div class="p-3 bg-appNavy text-center border-t border-appBorder">
+                        <button onClick={() => setShowArchivedDashboard(!showArchivedDashboard)} class="text-xs text-gray-500 hover:text-gray-300">
+                          {showArchivedDashboard ? 'Hide archived traders' : `Show ${archivedTraders.length} archived trader(s)`}
+                        </button>
+                      </div>
+                    )}
                   </div>
 
-                  {/* STATIC OPEN TRADES TRACKER (API HALTED FOR STABILITY) */}
                   <LiveOpenTradesTracker trades={trades} traders={traders} />
-
                   <DashboardCharts trades={trades} traders={traders} />
                 </div>
               )}
@@ -977,6 +1139,7 @@
               {currentView === 'tradelog' && <TradeLogView trades={trades} setTrades={setTrades} traders={traders} setTraders={setTraders} cashLedger={cashLedger} setCashLedger={setCashLedger} isAdmin={isAdmin} />}
               {currentView === 'ledger' && <CashLedgerView cashLedger={cashLedger} setCashLedger={setCashLedger} traders={traders} setTraders={setTraders} trades={trades} isAdmin={isAdmin} />}
               {currentView === 'statements' && <MonthlyStatementView cashLedger={cashLedger} trades={trades} traders={traders} />}
+              {currentView === 'profitshare' && <ProfitShareView cashLedger={cashLedger} trades={trades} traders={traders} />}
               
               {currentView === 'traders' && ( 
                 <div class="animate-fade-in">
@@ -987,20 +1150,97 @@
                       <button onClick={handleAddTrader} class="bg-appAccent text-appNavy font-semibold px-4 py-2 rounded-lg hover:bg-sky-400 transition">+ Add Trader</button>
                     </div>
                   )}
-                  <div class="bg-appNavy border border-appBorder rounded-xl overflow-hidden max-w-2xl">
-                    <ul class="divide-y divide-appBorder">
-                      {traders.map((trader) => (
-                        <li key={trader.id} class="flex items-center justify-between p-4 hover:bg-white/5 transition">
-                          {editingTraderId === trader.id ? ( <input type="text" value={editTraderName} onChange={(e) => setEditTraderName(e.target.value)} class="bg-appCard border border-appAccent text-white rounded px-2 py-1 focus:outline-none" /> ) : ( <span class="text-white font-medium">{trader.name}</span> )}
-                          {isAdmin && (
-                            <div class="space-x-3">
-                              {editingTraderId === trader.id ? ( <button onClick={saveEditTrader} class="text-appGreen hover:text-green-400 text-sm font-medium">Save</button> ) : ( <button onClick={() => startEditingTrader(trader)} class="text-gray-400 hover:text-white text-sm font-medium">Edit</button> )}
-                              <button onClick={() => handleDeleteTrader(trader.id)} class="text-appRed hover:text-red-400 text-sm font-medium">Remove</button>
-                            </div>
-                          )}
-                        </li>
-                      ))}
-                    </ul>
+
+                  <div class="space-y-6 max-w-4xl">
+                    <div class="bg-appNavy border border-appBorder rounded-xl overflow-hidden shadow-sm">
+                      <div class="p-4 bg-appCard border-b border-appBorder"><h3 class="text-white font-medium">Active Traders</h3></div>
+                      <ul class="divide-y divide-appBorder">
+                        {activeTraders.map((trader) => {
+                          const stats = traderStats[trader.id];
+                          const isSettleable = isTraderSettleable(trader.id);
+                          const nonZeroHolding = Math.abs(stats.cashHolding) >= 1;
+
+                          return (
+                            <li key={trader.id} class="flex items-center justify-between p-4 hover:bg-white/5 transition">
+                              <div class="flex items-center space-x-4">
+                                {editingTraderId === trader.id ? ( 
+                                  <input type="text" value={editTraderName} onChange={(e) => setEditTraderName(e.target.value)} class="bg-appCard border border-appAccent text-white rounded px-2 py-1 focus:outline-none" /> 
+                                ) : ( 
+                                  <span class="text-white font-semibold min-w-[120px]">{trader.name}</span> 
+                                )}
+                                
+                                <span class="text-gray-400 text-sm border-l border-appBorder pl-4">{formatMoney(stats.cashHolding)} holding</span>
+                                
+                                {isSettleable ? (
+                                  <span class="px-2 py-1 rounded-full text-xs font-semibold bg-appGreen/10 text-appGreen border border-appGreen/30">✅ Ready to Settle</span>
+                                ) : (
+                                  <span class="px-2 py-1 rounded-full text-xs bg-gray-800 text-gray-300 border border-gray-700">
+                                    Active · {nonZeroHolding ? `${formatMoney(stats.cashHolding)} cash ` : ''}
+                                    {nonZeroHolding && stats.openTradesCount > 0 ? '+ ' : ''}
+                                    {stats.openTradesCount > 0 ? `${stats.openTradesCount} open position(s)` : ''}
+                                  </span>
+                                )}
+                              </div>
+                              
+                              {isAdmin && (
+                                <div class="flex items-center space-x-3">
+                                  {nonZeroHolding && stats.amountDeployed === 0 && (
+                                    <button onClick={() => handleQuickSettlePayout(trader.id)} class="text-appAccent text-xs bg-appAccent/10 px-3 py-1.5 rounded border border-appAccent/30 hover:bg-appAccent/20 transition">
+                                      Record Final Payout ({formatMoney(stats.cashHolding)})
+                                    </button>
+                                  )}
+                                  
+                                  {editingTraderId === trader.id ? ( 
+                                    <button onClick={saveEditTrader} class="text-appGreen hover:text-green-400 text-sm font-medium">Save</button> 
+                                  ) : ( 
+                                    <button onClick={() => startEditingTrader(trader)} class="text-gray-400 hover:text-white text-sm font-medium">Edit</button> 
+                                  )}
+                                  
+                                  <button 
+                                    onClick={() => handleArchiveTrader(trader.id)} 
+                                    disabled={!isSettleable} 
+                                    title={!isSettleable ? `Still holds ${formatMoney(stats.cashHolding)} or has open positions — clear balance first.` : ''}
+                                    class={`text-sm font-medium px-2 py-1 rounded ${isSettleable ? 'text-appRed hover:bg-appRed/10 transition cursor-pointer' : 'text-gray-600 cursor-not-allowed'}`}
+                                  >
+                                    Settle & Remove
+                                  </button>
+                                </div>
+                              )}
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    </div>
+
+                    {archivedTraders.length > 0 && (
+                      <div class="bg-appNavy border border-appBorder rounded-xl overflow-hidden shadow-sm opacity-80">
+                        <div class="p-4 bg-appCard border-b border-appBorder"><h3 class="text-gray-400 font-medium">Archived / Settled Traders</h3></div>
+                        <ul class="divide-y divide-appBorder">
+                          {archivedTraders.map((trader) => (
+                            <li key={trader.id} class="flex items-center justify-between p-4 hover:bg-white/5 transition">
+                              <div class="flex items-center space-x-4">
+                                {editingTraderId === trader.id ? ( 
+                                  <input type="text" value={editTraderName} onChange={(e) => setEditTraderName(e.target.value)} class="bg-appCard border border-appAccent text-white rounded px-2 py-1 focus:outline-none" /> 
+                                ) : ( 
+                                  <span class="text-gray-400 font-medium min-w-[120px]">{trader.name}</span> 
+                                )}
+                                <span class="text-gray-500 text-xs border-l border-appBorder pl-4">Archived on {trader.archivedAt || 'Unknown'}</span>
+                              </div>
+                              {isAdmin && (
+                                <div class="flex items-center space-x-3">
+                                  {editingTraderId === trader.id ? ( 
+                                    <button onClick={saveEditTrader} class="text-appGreen hover:text-green-400 text-sm font-medium">Save</button> 
+                                  ) : ( 
+                                    <button onClick={() => startEditingTrader(trader)} class="text-gray-500 hover:text-white text-sm font-medium">Edit</button> 
+                                  )}
+                                  <button onClick={() => handleReactivateTrader(trader.id)} class="text-appAccent hover:text-sky-300 text-sm font-medium bg-appAccent/10 px-3 py-1 rounded">Reactivate</button>
+                                </div>
+                              )}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
                   </div>
                 </div> 
               )}
