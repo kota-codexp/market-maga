@@ -547,11 +547,10 @@
       const activeTradersList = traders.filter(t => t.active !== false);
       const emptyForm = { date: '', amount: '', fromMemberId: activeTradersList[0]?.id || '', toMemberId: activeTradersList[0]?.id || '', purpose: 'New Investment', comments: '', linkedTradeIds: [] };
       const [formData, setFormData] = useState(emptyForm);
-      const [activeDropdown, setActiveDropdown] = useState(null);
 
       const handleChange = (e) => { setFormData({ ...formData, [e.target.name]: e.target.value }); };
-      const handleEdit = (entry) => { setFormData({ date: cleanDateForInput(entry.date), amount: entry.amount, fromMemberId: entry.fromMemberId, toMemberId: entry.toMemberId, purpose: entry.purpose, comments: entry.comments || '', linkedTradeIds: entry.linkedTradeIds || [] }); setEditingLedgerId(entry.id); setShowForm(true); setActiveDropdown(null); };
-      const handleDelete = (entry) => { if(window.confirm('Delete this passbook entry?')) { setCashLedger(cashLedger.filter(l => l.id !== entry.id)); setSelectedLedgerIds(selectedLedgerIds.filter(id => id !== entry.id)); } setActiveDropdown(null); };
+      const handleEdit = (entry) => { setFormData({ date: cleanDateForInput(entry.date), amount: entry.amount, fromMemberId: entry.fromMemberId, toMemberId: entry.toMemberId, purpose: entry.purpose, comments: entry.comments || '', linkedTradeIds: entry.linkedTradeIds || [] }); setEditingLedgerId(entry.id); setShowForm(true); };
+      const handleDelete = (entry) => { if(window.confirm('Delete this passbook entry?')) { setCashLedger(cashLedger.filter(l => l.id !== entry.id)); setSelectedLedgerIds(selectedLedgerIds.filter(id => id !== entry.id)); } };
       const handleBulkDelete = () => { if(window.confirm(`Delete these ${selectedLedgerIds.length} passbook entries?`)) { setCashLedger(cashLedger.filter(l => !selectedLedgerIds.includes(l.id))); setSelectedLedgerIds([]); } };
       const handleSelectAll = (e) => { if (e.target.checked) setSelectedLedgerIds(cashLedger.map(l => l.id)); else setSelectedLedgerIds([]); };
       const handleSubmit = (e) => { e.preventDefault(); const entry = { id: editingLedgerId || Date.now(), date: formData.date, amount: parseFloat(formData.amount), fromMemberId: parseInt(formData.fromMemberId), toMemberId: parseInt(formData.toMemberId), purpose: formData.purpose, comments: formData.comments, linkedTradeIds: formData.purpose === 'Stock Sales' ? formData.linkedTradeIds : [] }; if (editingLedgerId) { setCashLedger(cashLedger.map(l => l.id === editingLedgerId ? entry : l).sort((a, b) => new Date(b.date) - new Date(a.date))); } else { setCashLedger([...cashLedger, entry].sort((a, b) => new Date(b.date) - new Date(a.date))); } setFormData(emptyForm); setShowForm(false); setEditingLedgerId(null); };
@@ -636,7 +635,7 @@
                 <div class="p-4 bg-appCard border-b border-appBorder"><h3 class="text-white font-medium">Monthly Contribution Grid</h3></div>
                 <div class="overflow-x-auto p-4"><table class="w-full text-left text-sm whitespace-nowrap"><thead><tr class="text-gray-400"><th class="pb-3 font-medium">Member</th>{uniqueMonths.map(m => <th key={m} class="pb-3 font-medium px-4 text-center">{m}</th>)}<th class="pb-3 font-medium text-right border-l border-appBorder pl-4">Total Invested</th></tr></thead><tbody class="divide-y divide-appBorder/50">{Object.values(gridData).map((row, idx) => (<tr key={idx} class="hover:bg-white/5 transition"><td class="py-3 text-white font-medium flex items-center">{row.name} {!row.active && <span class="ml-2 px-1 rounded text-[9px] bg-gray-700 text-gray-300">Archived</span>}</td>{uniqueMonths.map(m => { const amount = row.months[m]; if (amount === 0) return <td key={m} class="py-2 px-4 text-center"><div class="border border-dashed border-appRed/50 bg-appRed/10 text-appRed rounded text-xs py-1">No Entry</div></td>; return <td key={m} class="py-3 px-4 text-center text-appGreen">{formatMoney(amount)}</td>; })}<td class="py-3 text-right text-gray-300 border-l border-appBorder pl-4 font-semibold">{formatMoney(row.totalNet)}</td></tr>))}</tbody></table></div>
               </div>
-              <div class={`bg-appNavy border border-appBorder rounded-xl overflow-hidden ${activeDropdown ? 'relative z-50' : ''}`}>
+              <div class="bg-appNavy border border-appBorder rounded-xl overflow-hidden">
                 <div class="p-4 bg-appCard border-b border-appBorder"><h3 class="text-white font-medium">Market Magas PassBook</h3></div>
                 <div class="overflow-x-auto max-h-96">
                   <table class="w-full text-left text-sm whitespace-nowrap">
@@ -657,14 +656,11 @@
                             {entry.comments && <span class="block">{entry.comments}</span>}
                           </td>
                           {isAdmin && (
-                            <td class="px-4 py-3 relative text-center">
-                              <button onClick={() => setActiveDropdown(activeDropdown === entry.id ? null : entry.id)} class="text-gray-400 hover:text-white px-2 rounded hover:bg-white/10 font-bold">⋮</button>
-                              {activeDropdown === entry.id && (
-                                <div class="absolute right-6 top-8 w-24 bg-appCard border border-appBorder shadow-xl rounded z-50 overflow-hidden text-left">
-                                  <button onClick={() => handleEdit(entry)} class="block w-full px-4 py-2 hover:bg-white/5 text-appAccent text-xs">Edit</button>
-                                  <button onClick={() => handleDelete(entry)} class="block w-full px-4 py-2 hover:bg-white/5 text-appRed text-xs">Delete</button>
-                                </div>
-                              )}
+                            <td class="px-4 py-3 text-center">
+                              <div class="flex items-center justify-center space-x-3">
+                                <button onClick={() => handleEdit(entry)} class="text-appAccent hover:text-sky-300 text-xs font-medium bg-appAccent/10 px-2 py-1 rounded transition">Edit</button>
+                                <button onClick={() => handleDelete(entry)} class="text-appRed hover:text-red-400 text-xs font-medium bg-appRed/10 px-2 py-1 rounded transition">Delete</button>
+                              </div>
                             </td>
                           )}
                         </tr>
@@ -676,14 +672,12 @@
               </div>
             </div>
           )}
-          {activeDropdown && <div class="fixed inset-0 z-30" onClick={() => setActiveDropdown(null)}></div>}
         </div>
       );
     }
 
     function TradeLogView({ trades, setTrades, traders, setTraders, cashLedger, setCashLedger, isAdmin }) {
       const [showForm, setShowForm] = useState(false); const [editingTradeId, setEditingTradeId] = useState(null); const [filterTrader, setFilterTrader] = useState('All'); const [filterStatus, setFilterStatus] = useState('All'); const [selectedTradeIds, setSelectedTradeIds] = useState([]); 
-      const [activeDropdown, setActiveDropdown] = useState(null);
       const [analyzerTrade, setAnalyzerTrade] = useState(null);
 
       const activeTradersList = traders.filter(t => t.active !== false);
@@ -702,8 +696,8 @@
         setFormData(newFormData); 
       };
 
-      const handleEdit = (trade) => { const linkedLedger = trade.linkedLedgerEntryId ? cashLedger.find(l => l.id === trade.linkedLedgerEntryId) : null; setFormData({ symbol: trade.symbol, traderId: trade.traderId, buyDate: cleanDateForInput(trade.buyDate), sellDate: cleanDateForInput(trade.sellDate) || '', qty: trade.qty, buyPrice: trade.buyPrice, sellPrice: trade.sellPrice || '', isIntraday: trade.isIntraday ? 'true' : 'false', actualPnL: trade.actualPnL || '', intradayGains: trade.intradayGains || '', pat: trade.pat || '', notes: trade.notes || '', capitalInjected: linkedLedger ? linkedLedger.amount : '', linkedLedgerEntryId: trade.linkedLedgerEntryId || null }); setEditingTradeId(trade.id); setShowForm(true); setActiveDropdown(null); };
-      const handleDeleteTrade = (tradeToDelete) => { if(window.confirm(`Delete trade for ${tradeToDelete.symbol}?`)) { if (tradeToDelete.linkedLedgerEntryId) setCashLedger(cashLedger.filter(l => l.id !== tradeToDelete.linkedLedgerEntryId)); setTrades(trades.filter(t => t.id !== tradeToDelete.id)); setSelectedTradeIds(selectedTradeIds.filter(id => id !== tradeToDelete.id)); } setActiveDropdown(null); };
+      const handleEdit = (trade) => { const linkedLedger = trade.linkedLedgerEntryId ? cashLedger.find(l => l.id === trade.linkedLedgerEntryId) : null; setFormData({ symbol: trade.symbol, traderId: trade.traderId, buyDate: cleanDateForInput(trade.buyDate), sellDate: cleanDateForInput(trade.sellDate) || '', qty: trade.qty, buyPrice: trade.buyPrice, sellPrice: trade.sellPrice || '', isIntraday: trade.isIntraday ? 'true' : 'false', actualPnL: trade.actualPnL || '', intradayGains: trade.intradayGains || '', pat: trade.pat || '', notes: trade.notes || '', capitalInjected: linkedLedger ? linkedLedger.amount : '', linkedLedgerEntryId: trade.linkedLedgerEntryId || null }); setEditingTradeId(trade.id); setShowForm(true); };
+      const handleDeleteTrade = (tradeToDelete) => { if(window.confirm(`Delete trade for ${tradeToDelete.symbol}?`)) { if (tradeToDelete.linkedLedgerEntryId) setCashLedger(cashLedger.filter(l => l.id !== tradeToDelete.linkedLedgerEntryId)); setTrades(trades.filter(t => t.id !== tradeToDelete.id)); setSelectedTradeIds(selectedTradeIds.filter(id => id !== tradeToDelete.id)); } };
       const handleBulkDelete = () => { if(window.confirm(`Delete ${selectedTradeIds.length} trades?`)) { const tradesToDelete = trades.filter(t => selectedTradeIds.includes(t.id)); const ledgerIdsToDelete = tradesToDelete.map(t => t.linkedLedgerEntryId).filter(id => id !== null); if (ledgerIdsToDelete.length > 0) setCashLedger(cashLedger.filter(l => !ledgerIdsToDelete.includes(l.id))); setTrades(trades.filter(t => !selectedTradeIds.includes(t.id))); setSelectedTradeIds([]); } };
       
       const handleSubmit = (e) => { 
@@ -786,7 +780,7 @@
           )}
 
           {importStatus === 'idle' && (
-            <div class={`bg-appNavy border border-appBorder rounded-xl pb-2 overflow-x-auto ${activeDropdown ? 'relative z-50' : ''}`}>
+            <div class="bg-appNavy border border-appBorder rounded-xl pb-2 overflow-x-auto">
               <div class="flex space-x-4 p-4 border-b border-appBorder">
                 <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)} class="bg-appNavy border border-appBorder text-white rounded px-3 py-1 text-sm outline-none"><option value="All">All</option><option value="Open">Open</option><option value="Closed">Closed</option></select>
                 <select value={filterTrader} onChange={(e) => setFilterTrader(e.target.value)} class="bg-appNavy border border-appBorder text-white rounded px-3 py-1 text-sm outline-none"><option value="All">All Traders</option>{traders.map(t => <option key={t.id} value={t.id}>{t.name} {t.active === false ? '(Archived)' : ''}</option>)}</select>
@@ -840,14 +834,11 @@
                         <td class="p-2 border-l border-appBorder bg-white/5 font-semibold text-appAccent">{t.status === 'Closed' ? formatMoney(netReturn) : '-'}</td>
                         
                         {isAdmin && (
-                          <td class="p-2 text-center relative">
-                            <button onClick={() => setActiveDropdown(activeDropdown === t.id ? null : t.id)} class="text-gray-400 hover:text-white px-2 rounded hover:bg-white/10 font-bold">⋮</button>
-                            {activeDropdown === t.id && (
-                              <div class="absolute right-6 top-8 w-24 bg-appCard border border-appBorder shadow-xl rounded z-50 overflow-hidden text-left">
-                                <button onClick={() => handleEdit(t)} class="block w-full px-4 py-2 hover:bg-white/5 text-appAccent text-xs">Edit</button>
-                                <button onClick={() => handleDeleteTrade(t)} class="block w-full px-4 py-2 hover:bg-white/5 text-appRed text-xs">Delete</button>
-                              </div>
-                            )}
+                          <td class="p-2 text-center">
+                            <div class="flex items-center justify-center space-x-2">
+                              <button onClick={() => handleEdit(t)} class="text-appAccent hover:text-sky-300 text-[10px] font-medium bg-appAccent/10 px-2 py-1 rounded transition">Edit</button>
+                              <button onClick={() => handleDeleteTrade(t)} class="text-appRed hover:text-red-400 text-[10px] font-medium bg-appRed/10 px-2 py-1 rounded transition">Delete</button>
+                            </div>
                           </td>
                         )}
                       </tr>
@@ -865,7 +856,6 @@
               </table>
             </div>
           )}
-          {activeDropdown && <div class="fixed inset-0 z-30" onClick={() => setActiveDropdown(null)}></div>}
         </div>
       );
     }
